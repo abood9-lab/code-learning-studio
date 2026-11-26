@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { FolderOpen, Loader2, Search, Trash2, X } from "lucide-react";
+import { confirmDialog } from "@/components/AppDialogs";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
@@ -65,7 +66,15 @@ export function ProjectLibrary({
   };
 
   const remove = async (project: Tables<"projects">) => {
-    if (!window.confirm(`Delete “${project.name}” and its files? This cannot be undone.`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Delete this project?",
+        description: `“${project.name}” and its files will be removed. This cannot be undone.`,
+        confirmLabel: "Delete project",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     const { error } = await supabase.from("projects").delete().eq("id", project.id);
     if (error) toast.error(error.message);

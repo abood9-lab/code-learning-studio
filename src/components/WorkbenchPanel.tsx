@@ -14,6 +14,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { confirmDialog, promptDialog } from "@/components/AppDialogs";
 import { toast } from "sonner";
 import { createProjectZip, downloadFile, makeWorkspaceFile } from "@/lib/workspace-tools";
 import { starterTemplates } from "@/lib/starter-templates";
@@ -117,7 +118,15 @@ export function WorkbenchPanel(props: WorkbenchPanelProps) {
       for (const file of chosen) {
         if (file.size > 2 * 1024 * 1024)
           throw new Error(`${file.name} is too large (maximum 2 MB)`);
-        if (next[file.name] && !window.confirm(`Replace ${file.name}?`)) continue;
+        if (
+          next[file.name] &&
+          !(await confirmDialog({
+            title: "Replace this file?",
+            description: `${file.name} already exists in the project and will be overwritten.`,
+            confirmLabel: "Replace",
+          }))
+        )
+          continue;
         const imported = makeWorkspaceFile(file.name, await file.text());
         next[imported.path] = imported;
       }
@@ -160,8 +169,18 @@ export function WorkbenchPanel(props: WorkbenchPanelProps) {
           </p>
         </div>
         <ProjectLibrary
-          onLoad={(id, name, next) => {
-            if (hasFiles && dirty && !window.confirm("Replace unsaved workspace files?")) return;
+          onLoad={async (id, name, next) => {
+            if (
+              hasFiles &&
+              dirty &&
+              !(await confirmDialog({
+                title: "Open another project?",
+                description: "This project has unsaved changes that will be lost.",
+                confirmLabel: "Open anyway",
+                danger: true,
+              }))
+            )
+              return;
             setUndo([]);
             setRedo([]);
             props.onLoadProject(id, name, next);
@@ -331,8 +350,13 @@ export function WorkbenchPanel(props: WorkbenchPanelProps) {
             setRedo((stack) => stack.slice(0, -1));
             props.onReplaceFiles(next);
           }}
-          onCreate={() => {
-            const path = window.prompt("File path", "new-file.js");
+          onCreate={async () => {
+            const path = await promptDialog({
+              title: "New file",
+              label: "File path",
+              defaultValue: "new-file.js",
+              confirmLabel: "Create file",
+            });
             if (!path) return;
             try {
               const file = makeWorkspaceFile(path, "");
@@ -343,8 +367,16 @@ export function WorkbenchPanel(props: WorkbenchPanelProps) {
               toast.error(error instanceof Error ? error.message : "Invalid path");
             }
           }}
-          onDelete={(path) => {
-            if (!window.confirm(`Delete ${path}?`)) return;
+          onDelete={async (path) => {
+            if (
+              !(await confirmDialog({
+                title: "Delete this file?",
+                description: `${path} will be removed from the project.`,
+                confirmLabel: "Delete file",
+                danger: true,
+              }))
+            )
+              return;
             const next = { ...files };
             delete next[path];
             changeFiles(next);

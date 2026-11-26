@@ -14,6 +14,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import { confirmDialog, promptDialog } from "@/components/AppDialogs";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -346,9 +347,14 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                     aria-label={`Remove ${user.email}`}
                     className="rounded p-1 text-muted-foreground hover:text-destructive"
                     onClick={() =>
-                      window.confirm(
-                        `Remove ${user.email}? They will no longer be able to sign in.`,
-                      ) && void act({ action: "deleteUser", id: user.id }, "User removed")
+                      void confirmDialog({
+                        title: "Remove this user?",
+                        description: `${user.email} will no longer be able to sign in to your app.`,
+                        confirmLabel: "Remove user",
+                        danger: true,
+                      }).then(
+                        (yes) => yes && act({ action: "deleteUser", id: user.id }, "User removed"),
+                      )
                     }
                   >
                     <Trash2 className="size-3.5" />
@@ -383,8 +389,14 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                     aria-label={`Delete ${file.path}`}
                     className="rounded p-1 text-muted-foreground hover:text-destructive"
                     onClick={() =>
-                      window.confirm(`Delete ${file.path}?`) &&
-                      void act({ action: "deleteFile", id: file.id }, "File deleted")
+                      void confirmDialog({
+                        title: "Delete this file?",
+                        description: `${file.path} will be removed for good.`,
+                        confirmLabel: "Delete file",
+                        danger: true,
+                      }).then(
+                        (yes) => yes && act({ action: "deleteFile", id: file.id }, "File deleted"),
+                      )
                     }
                   >
                     <Trash2 className="size-3.5" />
@@ -416,8 +428,15 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
             <button
               type="button"
               className="mt-1 flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2 py-1.5 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground"
-              onClick={() => {
-                const name = window.prompt("Table name (lowercase letters, numbers, _)")?.trim();
+              onClick={async () => {
+                const name = await promptDialog({
+                  title: "New table",
+                  label: "Table name",
+                  description:
+                    "Use lowercase letters, numbers and underscores, starting with a letter.",
+                  placeholder: "products",
+                  confirmLabel: "Create table",
+                });
                 if (!name) return;
                 void act(
                   {
@@ -478,9 +497,15 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                     title="Delete table"
                     aria-label="Delete table"
                     onClick={() =>
-                      window.confirm(
-                        `Delete table "${table.name}" and all ${table.rows} record(s)?`,
-                      ) && void act({ action: "dropTable", table: table.name }, "Table deleted")
+                      void confirmDialog({
+                        title: `Delete table "${table.name}"?`,
+                        description: `The table and all ${table.rows} record(s) in it will be removed for good.`,
+                        confirmLabel: "Delete table",
+                        danger: true,
+                      }).then(
+                        (yes) =>
+                          yes && act({ action: "dropTable", table: table.name }, "Table deleted"),
+                      )
                     }
                   >
                     <Trash2 />
@@ -656,8 +681,16 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                             aria-label="Delete record"
                             className="rounded p-1 text-muted-foreground hover:text-destructive"
                             onClick={() =>
-                              window.confirm("Delete this record?") &&
-                              void act({ action: "deleteRow", table: table.name, id: row.id })
+                              void confirmDialog({
+                                title: "Delete this record?",
+                                description: "This cannot be undone.",
+                                confirmLabel: "Delete record",
+                                danger: true,
+                              }).then(
+                                (yes) =>
+                                  yes &&
+                                  act({ action: "deleteRow", table: table.name, id: row.id }),
+                              )
                             }
                           >
                             <Trash2 className="size-3.5" />

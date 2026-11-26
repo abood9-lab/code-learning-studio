@@ -20,6 +20,7 @@ import {
   Trash2,
   User as UserIcon,
 } from "lucide-react";
+import { confirmDialog, promptDialog } from "@/components/AppDialogs";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -740,7 +741,16 @@ export function ChatWorkspace({
   };
 
   const handleDeleteChat = async (id: string) => {
-    if (busy || !window.confirm("Delete this conversation? This cannot be undone.")) return;
+    if (
+      busy ||
+      !(await confirmDialog({
+        title: "Delete this conversation?",
+        description: "This cannot be undone.",
+        confirmLabel: "Delete conversation",
+        danger: true,
+      }))
+    )
+      return;
     const { error } = await supabase.from("chats").delete().eq("id", id);
     if (error) {
       toast.error(error.message);
@@ -752,7 +762,12 @@ export function ChatWorkspace({
   };
 
   const renameChat = async (item: ChatSession) => {
-    const description = window.prompt("Conversation name", item.description)?.trim();
+    const description = await promptDialog({
+      title: "Rename conversation",
+      label: "Conversation name",
+      defaultValue: item.description,
+      confirmLabel: "Rename",
+    });
     if (!description) return;
     const { error } = await supabase
       .from("chats")

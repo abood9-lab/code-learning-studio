@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { confirmDialog } from "@/components/AppDialogs";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,7 +107,16 @@ export function ProjectSecretsModal({
   };
 
   const remove = async (name: string) => {
-    if (!projectId || !window.confirm(`Remove ${name} from this project?`)) return;
+    if (
+      !projectId ||
+      !(await confirmDialog({
+        title: "Remove this key?",
+        description: `${name} will be removed from this project.`,
+        confirmLabel: "Remove key",
+        danger: true,
+      }))
+    )
+      return;
     setBusy(name);
     try {
       const result = await manage({ data: { projectId, action: "delete", name } });
