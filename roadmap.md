@@ -10,3 +10,9 @@
 - [ ] Verify the signed-in flow in the browser — blocked: needs a real account on the user's Supabase.
 - [ ] Google sign-in — blocked: user must enable the Google provider in their Supabase dashboard.
 - [ ] Import legacy records — blocked: waiting for Firestore/Auth exports from the user.
+
+# Cloud Codzer
+- [ ] Cloud Codzer backend: per-project tables, rows, app users, file storage (inside the connected Supabase).
+- [ ] Cloud tab in the workbench (tables, rows, users, files, access rules).
+- [ ] `codzer` client available to generated apps in the preview; AI defines tables automatically.
+- [ ] Let a user connect their own Supabase to a project instead of Cloud Codzer.
