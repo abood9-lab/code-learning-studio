@@ -10,33 +10,141 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AdminStorageRouteImport } from './routes/admin.storage'
+import { Route as ApiChatRouteImport } from './routes/api/chat'
+import { Route as ApiEnhancerRouteImport } from './routes/api/enhancer'
+import { Route as ApiModelsRouteImport } from './routes/api/models'
+import { Route as ChatIndexRouteImport } from './routes/chat.index'
+import { Route as ChatIdRouteImport } from './routes/chat.$id'
+import { Route as ApiAdminStorageRouteImport } from './routes/api/admin/storage'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminStorageRoute = AdminStorageRouteImport.update({
+  id: '/admin/storage',
+  path: '/admin/storage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiChatRoute = ApiChatRouteImport.update({
+  id: '/api/chat',
+  path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiEnhancerRoute = ApiEnhancerRouteImport.update({
+  id: '/api/enhancer',
+  path: '/api/enhancer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiModelsRoute = ApiModelsRouteImport.update({
+  id: '/api/models',
+  path: '/api/models',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatIndexRoute = ChatIndexRouteImport.update({
+  id: '/chat/',
+  path: '/chat/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatIdRoute = ChatIdRouteImport.update({
+  id: '/chat/$id',
+  path: '/chat/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminStorageRoute = ApiAdminStorageRouteImport.update({
+  id: '/api/admin/storage',
+  path: '/api/admin/storage',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/admin/storage': typeof AdminStorageRoute
+  '/api/chat': typeof ApiChatRoute
+  '/api/enhancer': typeof ApiEnhancerRoute
+  '/api/models': typeof ApiModelsRoute
+  '/chat/$id': typeof ChatIdRoute
+  '/chat/': typeof ChatIndexRoute
+  '/api/admin/storage': typeof ApiAdminStorageRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/admin/storage': typeof AdminStorageRoute
+  '/api/chat': typeof ApiChatRoute
+  '/api/enhancer': typeof ApiEnhancerRoute
+  '/api/models': typeof ApiModelsRoute
+  '/chat/$id': typeof ChatIdRoute
+  '/chat': typeof ChatIndexRoute
+  '/api/admin/storage': typeof ApiAdminStorageRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/auth': typeof AuthRoute
+  '/admin/storage': typeof AdminStorageRoute
+  '/api/chat': typeof ApiChatRoute
+  '/api/enhancer': typeof ApiEnhancerRoute
+  '/api/models': typeof ApiModelsRoute
+  '/chat/$id': typeof ChatIdRoute
+  '/chat/': typeof ChatIndexRoute
+  '/api/admin/storage': typeof ApiAdminStorageRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/admin/storage'
+    | '/api/chat'
+    | '/api/enhancer'
+    | '/api/models'
+    | '/chat/$id'
+    | '/chat/'
+    | '/api/admin/storage'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/auth'
+    | '/admin/storage'
+    | '/api/chat'
+    | '/api/enhancer'
+    | '/api/models'
+    | '/chat/$id'
+    | '/chat'
+    | '/api/admin/storage'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth'
+    | '/admin/storage'
+    | '/api/chat'
+    | '/api/enhancer'
+    | '/api/models'
+    | '/chat/$id'
+    | '/chat/'
+    | '/api/admin/storage'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthRoute: typeof AuthRoute
+  AdminStorageRoute: typeof AdminStorageRoute
+  ApiChatRoute: typeof ApiChatRoute
+  ApiEnhancerRoute: typeof ApiEnhancerRoute
+  ApiModelsRoute: typeof ApiModelsRoute
+  ChatIdRoute: typeof ChatIdRoute
+  ChatIndexRoute: typeof ChatIndexRoute
+  ApiAdminStorageRoute: typeof ApiAdminStorageRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +156,75 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/storage': {
+      id: '/admin/storage'
+      path: '/admin/storage'
+      fullPath: '/admin/storage'
+      preLoaderRoute: typeof AdminStorageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chat': {
+      id: '/api/chat'
+      path: '/api/chat'
+      fullPath: '/api/chat'
+      preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/enhancer': {
+      id: '/api/enhancer'
+      path: '/api/enhancer'
+      fullPath: '/api/enhancer'
+      preLoaderRoute: typeof ApiEnhancerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/models': {
+      id: '/api/models'
+      path: '/api/models'
+      fullPath: '/api/models'
+      preLoaderRoute: typeof ApiModelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat/': {
+      id: '/chat/'
+      path: '/chat'
+      fullPath: '/chat/'
+      preLoaderRoute: typeof ChatIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat/$id': {
+      id: '/chat/$id'
+      path: '/chat/$id'
+      fullPath: '/chat/$id'
+      preLoaderRoute: typeof ChatIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/storage': {
+      id: '/api/admin/storage'
+      path: '/api/admin/storage'
+      fullPath: '/api/admin/storage'
+      preLoaderRoute: typeof ApiAdminStorageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthRoute: AuthRoute,
+  AdminStorageRoute: AdminStorageRoute,
+  ApiChatRoute: ApiChatRoute,
+  ApiEnhancerRoute: ApiEnhancerRoute,
+  ApiModelsRoute: ApiModelsRoute,
+  ChatIdRoute: ChatIdRoute,
+  ChatIndexRoute: ChatIndexRoute,
+  ApiAdminStorageRoute: ApiAdminStorageRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
