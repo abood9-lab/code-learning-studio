@@ -50,6 +50,222 @@ export type Database = {
         }
         Relationships: []
       }
+      cloud_files: {
+        Row: {
+          app_user_id: string | null
+          created_at: string
+          id: string
+          mime_type: string
+          owner_id: string
+          path: string
+          project_id: string
+          size_bytes: number
+        }
+        Insert: {
+          app_user_id?: string | null
+          created_at?: string
+          id?: string
+          mime_type?: string
+          owner_id: string
+          path: string
+          project_id: string
+          size_bytes?: number
+        }
+        Update: {
+          app_user_id?: string | null
+          created_at?: string
+          id?: string
+          mime_type?: string
+          owner_id?: string
+          path?: string
+          project_id?: string
+          size_bytes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cloud_files_app_user_id_fkey"
+            columns: ["app_user_id"]
+            isOneToOne: false
+            referencedRelation: "cloud_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cloud_files_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "cloud_projects"
+            referencedColumns: ["project_id"]
+          },
+        ]
+      }
+      cloud_projects: {
+        Row: {
+          api_key: string
+          backend: string
+          created_at: string
+          owner_id: string
+          project_id: string
+          supabase_key: string | null
+          supabase_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          api_key: string
+          backend?: string
+          created_at?: string
+          owner_id: string
+          project_id: string
+          supabase_key?: string | null
+          supabase_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          api_key?: string
+          backend?: string
+          created_at?: string
+          owner_id?: string
+          project_id?: string
+          supabase_key?: string | null
+          supabase_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cloud_projects_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: true
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cloud_rows: {
+        Row: {
+          app_user_id: string | null
+          created_at: string
+          data: Json
+          id: string
+          owner_id: string
+          project_id: string
+          table_name: string
+          updated_at: string
+        }
+        Insert: {
+          app_user_id?: string | null
+          created_at?: string
+          data?: Json
+          id?: string
+          owner_id: string
+          project_id: string
+          table_name: string
+          updated_at?: string
+        }
+        Update: {
+          app_user_id?: string | null
+          created_at?: string
+          data?: Json
+          id?: string
+          owner_id?: string
+          project_id?: string
+          table_name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cloud_rows_app_user_id_fkey"
+            columns: ["app_user_id"]
+            isOneToOne: false
+            referencedRelation: "cloud_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cloud_rows_project_id_table_name_fkey"
+            columns: ["project_id", "table_name"]
+            isOneToOne: false
+            referencedRelation: "cloud_tables"
+            referencedColumns: ["project_id", "name"]
+          },
+        ]
+      }
+      cloud_tables: {
+        Row: {
+          columns: Json
+          created_at: string
+          id: string
+          name: string
+          owner_id: string
+          project_id: string
+          read_access: string
+          updated_at: string
+          write_access: string
+        }
+        Insert: {
+          columns?: Json
+          created_at?: string
+          id?: string
+          name: string
+          owner_id: string
+          project_id: string
+          read_access?: string
+          updated_at?: string
+          write_access?: string
+        }
+        Update: {
+          columns?: Json
+          created_at?: string
+          id?: string
+          name?: string
+          owner_id?: string
+          project_id?: string
+          read_access?: string
+          updated_at?: string
+          write_access?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cloud_tables_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "cloud_projects"
+            referencedColumns: ["project_id"]
+          },
+        ]
+      }
+      cloud_users: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          owner_id: string
+          password_hash: string
+          project_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          owner_id: string
+          password_hash: string
+          project_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          owner_id?: string
+          password_hash?: string
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cloud_users_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "cloud_projects"
+            referencedColumns: ["project_id"]
+          },
+        ]
+      }
       legacy_user_imports: {
         Row: {
           bio: string
