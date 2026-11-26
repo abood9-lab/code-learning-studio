@@ -48,7 +48,9 @@ export const Route = createFileRoute("/api/admin/storage")({
         const [projectsRes, sessionsRes] = await Promise.all([
           userClient
             .from("projects")
-            .select("id, owner_id, name, volume_name, volume_subpath, sandbox_id, sandbox_status, total_files, total_bytes, updated_at")
+            .select(
+              "id, owner_id, name, volume_name, volume_subpath, sandbox_id, sandbox_status, total_files, total_bytes, updated_at",
+            )
             .order("updated_at", { ascending: false })
             .limit(50),
           userClient

@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { X, Mail, Lock, User, Loader2, KeyRound } from "lucide-react";
-import { LovableMark } from "@lovable.dev/cloud-auth-js/react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
 import { BrandLogo } from "@/components/BrandLogo";
 
@@ -24,21 +22,17 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
   if (!isOpen) return null;
 
-  const handleOAuth = async (provider: "google" | "lovable") => {
+  const handleOAuth = async () => {
     setError(null);
     setLoading(true);
     try {
-      const result = await lovable.auth.signInWithOAuth(provider, {
-        redirect_uri: window.location.origin,
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/auth` },
       });
-      if (result.error) {
-        setError(result.error.message || "Authentication failed");
-        return;
-      }
-      if (result.redirected) return;
-      onSuccess();
+      if (oauthError) setError(oauthError.message || "Google sign-in failed");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
+      setError(err instanceof Error ? err.message : "Google sign-in failed");
     } finally {
       setLoading(false);
     }
@@ -71,7 +65,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
         if (data.session) {
           onSuccess();
         } else {
-          setMessage("Account created! Please check your email to verify your address before signing in.");
+          setMessage(
+            "Account created! Please check your email to verify your address before signing in.",
+          );
         }
       } else {
         const { error: signInErr } = await supabase.auth.signInWithPassword({
@@ -122,33 +118,40 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               type="button"
               variant="outline"
               disabled={loading}
-              onClick={() => handleOAuth("google")}
+              onClick={() => void handleOAuth()}
               className="h-10 w-full justify-center gap-2.5 border-[#747775] bg-[#FFFFFF] text-[14px] font-medium text-[#1F1F1F] hover:bg-[#F2F2F2] dark:border-[#8E918F] dark:bg-[#131314] dark:text-[#E3E3E3] dark:hover:bg-[#1e1f20]"
-              style={{ fontFamily: "'Google Sans', var(--font-sans)" }}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
-                <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z" />
-                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z" />
-                <path fill="#FBBC05" d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z" />
-                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                className="h-[18px] w-[18px]"
+                aria-hidden="true"
+              >
+                <path
+                  fill="#4285F4"
+                  d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"
+                />
               </svg>
               Continue with Google
             </Button>
 
-            <Button
-              type="button"
-              variant="outline"
-              disabled={loading}
-              onClick={() => handleOAuth("lovable")}
-              className="h-10 w-full justify-center gap-2.5 text-[14px] font-medium"
-            >
-              <LovableMark className="h-[18px] w-[18px]" />
-              Continue with Lovable
-            </Button>
-
             <div className="relative my-3 flex items-center">
               <div className="flex-1 border-t border-border" />
-              <span className="px-3 text-[11px] uppercase tracking-wider text-muted-foreground">or email</span>
+              <span className="px-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+                or email
+              </span>
               <div className="flex-1 border-t border-border" />
             </div>
           </div>
@@ -195,19 +198,35 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             </div>
           )}
 
-          {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
-          {message && <p className="rounded-lg bg-accent px-3 py-2 text-xs text-accent-foreground">{message}</p>}
+          {error && (
+            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {error}
+            </p>
+          )}
+          {message && (
+            <p className="rounded-lg bg-accent px-3 py-2 text-xs text-accent-foreground">
+              {message}
+            </p>
+          )}
 
           <Button type="submit" disabled={loading} className="w-full">
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "signin" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Verification Link"}
+            {mode === "signin"
+              ? "Sign In"
+              : mode === "signup"
+                ? "Create Account"
+                : "Send Verification Link"}
           </Button>
         </form>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           {mode === "signin" ? (
             <>
-              <button type="button" onClick={() => setMode("signup")} className="hover:text-foreground">
+              <button
+                type="button"
+                onClick={() => setMode("signup")}
+                className="hover:text-foreground"
+              >
                 Need an account? Sign up
               </button>
               <button
@@ -219,7 +238,11 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               </button>
             </>
           ) : (
-            <button type="button" onClick={() => setMode("signin")} className="hover:text-foreground">
+            <button
+              type="button"
+              onClick={() => setMode("signin")}
+              className="hover:text-foreground"
+            >
               Back to sign in
             </button>
           )}

@@ -103,7 +103,12 @@ export function ProfileModal({ isOpen, profile, onClose, onSaved, onSignOut }: P
           </div>
 
           <div className="flex items-center justify-between pt-2">
-            <Button type="button" variant="outline" onClick={onSignOut} className="gap-1.5 text-destructive">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onSignOut}
+              className="gap-1.5 text-destructive"
+            >
               <LogOut className="h-3.5 w-3.5" /> Sign Out
             </Button>
             <Button type="submit" disabled={saving}>

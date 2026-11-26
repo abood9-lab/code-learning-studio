@@ -1,10 +1,12 @@
 # Whiterchat upgrade
-- [ ] Add Daytona command terminal, live streamed code, guided Plan modal, secure project-secret modal and upgraded preview/workspace styling.
-- [ ] Verify migrated preview, authentication and AI chat.
-- [ ] Add project library with cloud save/load for edited workspace files.
-- [ ] Add starter templates, file creation/deletion, ZIP export and text-file import.
-- [ ] Add conversation search/rename/export, copy responses and stop generation.
-- [ ] Verify desktop/mobile flows and tests.
-- [ ] Connect optional external services; waiting for user credentials.
-- [ ] Cover all three requested areas: projects, AI conversations, and cloud runtime/media integrations.
-- [ ] Import legacy records; waiting for Firestore/Auth exports from user.
+- [x] Import project from GitHub and create database tables on the connected Supabase.
+- [x] Connect Daytona, generate the project-key encryption secret, delete old stopped sandboxes.
+- [x] Daytona terminal wired into the workbench (verified against a real sandbox).
+- [x] Live streamed code in the editor while the AI writes.
+- [x] Plan mode: questions sheet rising from the prompt box, then a polished plan card.
+- [x] Project API keys modal when the AI requests secrets.
+- [x] Professional preview (browser frame, devices, console, new tab, full screen).
+- [x] Restyle landing, auth and workspace.
+- [ ] Verify the signed-in flow in the browser — blocked: needs a real account on the user's Supabase.
+- [ ] Google sign-in — blocked: user must enable the Google provider in their Supabase dashboard.
+- [ ] Import legacy records — blocked: waiting for Firestore/Auth exports from the user.

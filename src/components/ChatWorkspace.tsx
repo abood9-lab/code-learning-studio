@@ -1,39 +1,55 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useServerFn } from "@tanstack/react-start";
 import {
-  Menu,
-  Plus,
-  Send,
-  Sparkles,
-  Trash2,
-  PanelRightOpen,
-  Sun,
-  Moon,
-  Shield,
-  User as UserIcon,
-  Loader2,
-  FileCode2,
+  ArrowUp,
+  Download,
   Hammer,
   ListChecks,
-  Copy,
-  Download,
-  Square,
-  Search,
+  Loader2,
+  Menu,
+  Moon,
+  PanelRightOpen,
   Pencil,
+  Plus,
+  Search,
+  Shield,
+  Sparkles,
+  Square,
+  Sun,
+  Trash2,
+  User as UserIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { parseArtifactsFromText } from "@/lib/artifact-parser";
-import type { ChatMessage, ChatSession, ExecutionMode, ProviderId, WorkspaceFile } from "@/lib/types";
+import { inferLanguage, parseArtifactsFromText } from "@/lib/artifact-parser";
+import {
+  extractSecretRequests,
+  planningQuestionsSchema,
+  streamedFiles,
+  type PlanningQuestion,
+  type SecretRequest,
+} from "@/lib/workspace-protocol";
+import { conversationMarkdown, downloadFile } from "@/lib/workspace-tools";
+import { manageProjectSecrets } from "@/lib/workspace.functions";
+import type {
+  ChatMessage,
+  ChatSession,
+  ExecutionMode,
+  ProviderId,
+  WorkspaceFile,
+} from "@/lib/types";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ModelSelector } from "@/components/ModelSelector";
 import { ProfileModal } from "@/components/ProfileModal";
-import { WorkbenchPanel } from "@/components/WorkbenchPanel";
+import { WorkbenchPanel, type WorkbenchTab } from "@/components/WorkbenchPanel";
+import { PlanningModal, type PlanningAnswer } from "@/components/PlanningModal";
+import { ProjectSecretsModal } from "@/components/ProjectSecretsModal";
+import { ChatMessageItem } from "@/components/chat/ChatMessageItem";
 import { Button } from "@/components/ui/button";
-import { conversationMarkdown, downloadFile } from "@/lib/workspace-tools";
+
+type FileMap = Record<string, WorkspaceFile>;
 
 interface ChatWorkspaceProps {
   chatId?: string;
@@ -41,6 +57,51 @@ interface ChatWorkspaceProps {
   initialProvider?: ProviderId;
   initialModel?: string;
   initialMode?: ExecutionMode;
+}
+
+interface PlanningState {
+  loading: boolean;
+  questions: PlanningQuestion[];
+  history: ChatMessage[];
+  chatId: string;
+  text: string;
+}
+
+const DEFAULT_PROJECT_NAME = "Untitled project";
+const SUGGESTIONS = [
+  "A landing page for a specialty coffee shop with a menu and booking form",
+  "A personal finance tracker with charts and monthly budgets",
+  "A kanban task board with drag and drop",
+  "A weather dashboard that calls a weather API",
+];
+
+const newId = (prefix: string) =>
+  `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+const snapshotOf = (name: string, files: FileMap) => JSON.stringify({ name, files });
+
+/** Providers reject two messages in a row from the same role, so merge them. */
+function toApiMessages(history: ChatMessage[]) {
+  const merged: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const message of history) {
+    if (!message.content.trim()) continue;
+    const last = merged.at(-1);
+    if (last && last.role === message.role)
+      last.content = `${last.content}\n\n${message.content}`.slice(0, 60000);
+    else merged.push({ role: message.role, content: message.content.slice(0, 60000) });
+  }
+  return merged;
+}
+
+function parseQuestions(text: string): PlanningQuestion[] | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const parsed = planningQuestionsSchema.safeParse(JSON.parse(text.slice(start, end + 1)));
+    return parsed.success ? parsed.data.questions : null;
+  } catch {
+    return null;
+  }
 }
 
 export function ChatWorkspace({
@@ -51,32 +112,75 @@ export function ChatWorkspace({
   initialMode = "build",
 }: ChatWorkspaceProps) {
   const navigate = useNavigate();
-  const { session, user, profile, isAdmin, loading: authLoading, refreshProfile, signOut } = useAuth();
+  const {
+    session,
+    user,
+    profile,
+    isAdmin,
+    loading: authLoading,
+    refreshProfile,
+    signOut,
+  } = useAuth();
+  const listSecrets = useServerFn(manageProjectSecrets);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [tab, setTab] = useState<WorkbenchTab>("preview");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
 
   const [history, setHistory] = useState<ChatSession[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string>(chatId && chatId !== "new" ? chatId : "");
+  const [historySearch, setHistorySearch] = useState("");
+  const [activeChatId, setActiveChatId] = useState(chatId && chatId !== "new" ? chatId : "");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [files, setFiles] = useState<Record<string, WorkspaceFile>>({});
   const [input, setInput] = useState("");
   const [provider, setProvider] = useState<ProviderId>(initialProvider);
-  const [model, setModel] = useState<string>(initialModel);
+  const [model, setModel] = useState(initialModel);
   const [mode, setMode] = useState<ExecutionMode>(initialMode);
   const [streaming, setStreaming] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
-  const [historySearch, setHistorySearch] = useState("");
-  const abortRef = useRef<AbortController | null>(null);
 
+  const [files, setFiles] = useState<FileMap>({});
+  const [live, setLive] = useState<{ files: FileMap; path: string } | null>(null);
+  const [projectId, setProjectId] = useState("");
+  const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
+  const [savedSnapshot, setSavedSnapshot] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [secretNames, setSecretNames] = useState<string[]>([]);
+
+  const [planning, setPlanning] = useState<PlanningState | null>(null);
+  const [secretsModal, setSecretsModal] = useState<{ open: boolean; requests: SecretRequest[] }>({
+    open: false,
+    requests: [],
+  });
+
+  const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const autoSentRef = useRef(false);
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const nameRef = useRef(projectName);
+  nameRef.current = projectName;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+  const chatIdRef = useRef(activeChatId);
+  chatIdRef.current = activeChatId;
+  const secretNamesRef = useRef(secretNames);
+  secretNamesRef.current = secretNames;
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  const userId = user?.id;
+  const persisted = savedSnapshot !== "";
+  const dirty = useMemo(
+    () => snapshotOf(projectName, files) !== savedSnapshot,
+    [projectName, files, savedSnapshot],
+  );
+  const fileCount = Object.keys(files).length;
+  const busy = streaming || planning !== null;
 
   useEffect(() => {
-    const saved = localStorage.getItem("bolt_theme");
-    if (saved === "dark" || saved === "light") setTheme(saved);
+    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
   }, []);
 
   const toggleTheme = () => {
@@ -86,6 +190,17 @@ export function ChatWorkspace({
     document.documentElement.setAttribute("data-theme", next);
     document.documentElement.classList.toggle("dark", next === "dark");
   };
+
+  const resetWorkspace = useCallback(() => {
+    setMessages([]);
+    setFiles({});
+    setLive(null);
+    setProjectId("");
+    setProjectName(DEFAULT_PROJECT_NAME);
+    setSavedSnapshot("");
+    setSecretNames([]);
+    setActiveChatId("");
+  }, []);
 
   const loadHistory = useCallback(async () => {
     if (!user) return;
@@ -106,53 +221,173 @@ export function ChatWorkspace({
   }, [user]);
 
   useEffect(() => {
-    if (!authLoading && !user) {
+    if (!authLoading && !user)
       void navigate({ to: "/auth", search: { mode: "signin" }, replace: true });
-    }
   }, [authLoading, user, navigate]);
 
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
 
+  const refreshSecrets = useCallback(
+    async (id: string) => {
+      try {
+        const result = await listSecrets({ data: { projectId: id, action: "list" } });
+        setSecretNames(result.keys.map((key) => key.name));
+      } catch {
+        setSecretNames([]);
+      }
+    },
+    [listSecrets],
+  );
+
+  // Open a saved conversation, preferring the saved project files (which keep manual edits) over chat artifacts.
   useEffect(() => {
-    if (!user || !chatId || chatId === "new") {
-      setMessages([]);
-      setFiles({});
-      setActiveChatId("");
+    if (!userId || !chatId || chatId === "new") {
+      resetWorkspace();
       return;
     }
+    let cancelled = false;
     setActiveChatId(chatId);
-    supabase
-      .from("chats")
-      .select("*")
-      .eq("id", chatId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!data) return;
-        const loadedMsgs = Array.isArray(data.messages) ? (data.messages as unknown as ChatMessage[]) : [];
-        setMessages(loadedMsgs);
-        setProvider((data.provider as ProviderId) || "lovable");
-        setModel(data.model || "openai/gpt-6.1-terra");
+    void (async () => {
+      const { data } = await supabase.from("chats").select("*").eq("id", chatId).maybeSingle();
+      if (cancelled || !data) return;
+      const loaded = Array.isArray(data.messages)
+        ? (data.messages as unknown as ChatMessage[])
+        : [];
+      setMessages(loaded);
+      setProvider((data.provider as ProviderId) || "lovable");
+      setModel(data.model || "openai/gpt-6.1-terra");
 
-        const extracted: Record<string, WorkspaceFile> = {};
-        for (const m of loadedMsgs) {
-          if (m.role === "assistant") {
-            const { artifacts } = parseArtifactsFromText(m.content);
-            for (const a of artifacts) {
-              for (const f of a.files) extracted[f.path] = f;
-            }
-          }
+      const linkedId = `proj_${chatId}`;
+      const { data: project } = await supabase
+        .from("projects")
+        .select("id,name")
+        .eq("id", linkedId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (project) {
+        const { data: rows } = await supabase
+          .from("project_files")
+          .select("relative_path,content")
+          .eq("project_id", project.id);
+        if (cancelled) return;
+        const loadedFiles: FileMap = Object.fromEntries(
+          (rows ?? []).map((row) => [
+            row.relative_path,
+            {
+              path: row.relative_path,
+              content: row.content,
+              language: inferLanguage(row.relative_path),
+            },
+          ]),
+        );
+        setFiles(loadedFiles);
+        setProjectId(project.id);
+        setProjectName(project.name);
+        setSavedSnapshot(snapshotOf(project.name, loadedFiles));
+        if (Object.keys(loadedFiles).length) setWorkbenchOpen(true);
+        void refreshSecrets(project.id);
+        return;
+      }
+      let extracted: FileMap = {};
+      for (const message of loaded)
+        if (message.role === "assistant")
+          extracted = { ...extracted, ...streamedFiles(message.content) };
+      setFiles(extracted);
+      setProjectId("");
+      setSavedSnapshot("");
+      setSecretNames([]);
+      if (Object.keys(extracted).length) setWorkbenchOpen(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, userId, resetWorkspace, refreshSecrets]);
+
+  const ensureChatId = useCallback(() => {
+    if (chatIdRef.current) return chatIdRef.current;
+    const id = newId("chat");
+    chatIdRef.current = id;
+    setActiveChatId(id);
+    return id;
+  }, []);
+
+  /** Saves the workspace to the user's project, creating it on first save. Returns the project id. */
+  const saveProject = useCallback(
+    async (options?: { files?: FileMap; name?: string; silent?: boolean }): Promise<string> => {
+      if (!user) throw new Error("Sign in to save a project");
+      const current = options?.files ?? filesRef.current;
+      const name = (options?.name ?? nameRef.current).trim() || DEFAULT_PROJECT_NAME;
+      const id = projectIdRef.current || `proj_${ensureChatId()}`;
+      setSaving(true);
+      try {
+        const entries = Object.values(current);
+        const size = (text: string) => new TextEncoder().encode(text).byteLength;
+        const now = new Date().toISOString();
+        const { error: projectError } = await supabase.from("projects").upsert({
+          id,
+          owner_id: user.id,
+          name,
+          total_files: entries.length,
+          total_bytes: entries.reduce((sum, file) => sum + size(file.content), 0),
+          storage_backend: "database",
+          updated_at: now,
+        });
+        if (projectError) throw projectError;
+        projectIdRef.current = id;
+        setProjectId(id);
+        const { data: previous, error: readError } = await supabase
+          .from("project_files")
+          .select("id,relative_path")
+          .eq("project_id", id);
+        if (readError) throw readError;
+        if (entries.length) {
+          const { error: fileError } = await supabase.from("project_files").upsert(
+            entries.map((file) => ({
+              id: `${id}:${file.path}`,
+              owner_id: user.id,
+              project_id: id,
+              relative_path: file.path,
+              content: file.content,
+              mime_type: "text/plain",
+              size_bytes: size(file.content),
+              storage_location: "database",
+              updated_at: now,
+            })),
+          );
+          if (fileError) throw fileError;
         }
-        setFiles(extracted);
-        if (Object.keys(extracted).length > 0) setWorkbenchOpen(true);
-      });
-  }, [chatId, user]);
+        const obsolete = (previous ?? [])
+          .filter((file) => !current[file.relative_path])
+          .map((file) => file.id);
+        if (obsolete.length) {
+          const { error } = await supabase.from("project_files").delete().in("id", obsolete);
+          if (error) throw error;
+        }
+        setSavedSnapshot(snapshotOf(options?.name ?? nameRef.current, current));
+        if (!options?.silent) toast.success("Project saved");
+        return id;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [user, ensureChatId],
+  );
+
+  /** Returns the project id, saving first when there are unsaved changes or no project yet. */
+  const ensureProject = useCallback(async () => {
+    const unsaved = snapshotOf(nameRef.current, filesRef.current) !== savedSnapshot;
+    if (projectIdRef.current && !unsaved) return projectIdRef.current;
+    return saveProject({ silent: true });
+  }, [saveProject, savedSnapshot]);
 
   const persistChat = useCallback(
     async (id: string, nextMessages: ChatMessage[]) => {
       if (!user) return;
-      const description = history.find((chat) => chat.id === id)?.description ?? (nextMessages[0]?.content ?? "New Chat").slice(0, 80);
+      const description =
+        historyRef.current.find((chat) => chat.id === id)?.description ??
+        (nextMessages[0]?.content ?? "New Chat").slice(0, 80);
       const { error } = await supabase.from("chats").upsert({
         id,
         user_id: user.id,
@@ -164,102 +399,228 @@ export function ChatWorkspace({
         updated_at: new Date().toISOString(),
       });
       if (error) throw new Error(`Conversation could not be saved: ${error.message}`);
+      // Keep the address shareable without remounting the workspace mid-session.
+      if (!window.location.pathname.endsWith(`/chat/${id}`))
+        window.history.replaceState(window.history.state, "", `/chat/${id}`);
       void loadHistory();
     },
-    [user, provider, model, loadHistory, history],
+    [user, provider, model, loadHistory],
   );
 
-  const sendMessage = useCallback(
-    async (textOverride?: string) => {
-      const text = (textOverride ?? input).trim();
-      if (!text || streaming || !session?.access_token) return;
+  const callChat = useCallback(
+    (body: Record<string, unknown>, signal: AbortSignal) =>
+      fetch("/api/chat", {
+        signal,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({ provider, model, secretNames: secretNamesRef.current, ...body }),
+      }),
+    [session, provider, model],
+  );
 
-      const currentId = activeChatId || `chat_${Date.now().toString(36)}`;
-      if (!activeChatId) setActiveChatId(currentId);
-
-      const userMsg: ChatMessage = { id: `u_${Date.now()}`, role: "user", content: text };
-      const assistantId = `a_${Date.now() + 1}`;
-      const nextHistory = [...messages, userMsg];
-
-      setMessages([...nextHistory, { id: assistantId, role: "assistant", content: "" }]);
-      setInput("");
+  const generate = useCallback(
+    async (currentId: string, turnHistory: ChatMessage[], kind: ExecutionMode) => {
+      const assistantId = newId("a");
+      setMessages([...turnHistory, { id: assistantId, role: "assistant", content: "", kind }]);
       setStreaming(true);
       const controller = new AbortController();
       abortRef.current = controller;
       let accumulated = "";
+      let frame = 0;
+      let committed = 0;
+      let opened = false;
+
+      const flush = () => {
+        frame = 0;
+        const snapshot = accumulated;
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === assistantId ? { ...message, content: snapshot } : message,
+          ),
+        );
+        if (kind !== "build") return;
+        const partial = streamedFiles(snapshot);
+        const paths = Object.keys(partial);
+        if (!paths.length) return;
+        const complete = streamedFiles(snapshot, true);
+        let writing = "";
+        for (const path of paths)
+          if (!complete[path] || complete[path].content !== partial[path]?.content) writing = path;
+        setLive({ files: partial, path: writing });
+        if (!opened) {
+          opened = true;
+          setWorkbenchOpen(true);
+          setTab("code");
+        }
+        const done = Object.keys(complete).length;
+        if (done > committed) {
+          committed = done;
+          // Only finished files reach the preview, so half-written scripts never run.
+          setFiles((previous) => ({ ...previous, ...complete }));
+        }
+      };
+
+      const finish = async (aborted: boolean) => {
+        if (frame) cancelAnimationFrame(frame);
+        frame = 0;
+        const finalMessages: ChatMessage[] = accumulated
+          ? [...turnHistory, { id: assistantId, role: "assistant", content: accumulated, kind }]
+          : turnHistory;
+        setMessages(finalMessages);
+        setLive(null);
+        const produced = kind === "build" ? streamedFiles(accumulated, aborted) : {};
+        let nextFiles = filesRef.current;
+        let nextName = nameRef.current;
+        if (Object.keys(produced).length) {
+          nextFiles = { ...filesRef.current, ...produced };
+          setFiles(nextFiles);
+          const title = parseArtifactsFromText(accumulated).artifacts[0]?.title;
+          if (title && nextName === DEFAULT_PROJECT_NAME) {
+            nextName = title.slice(0, 80);
+            setProjectName(nextName);
+          }
+          setWorkbenchOpen(true);
+          if (Object.keys(nextFiles).some((path) => /\.html?$/i.test(path))) setTab("preview");
+        }
+        try {
+          await persistChat(currentId, finalMessages);
+          if (Object.keys(produced).length)
+            await saveProject({ files: nextFiles, name: nextName, silent: true });
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Save failed");
+        }
+        if (!aborted) {
+          const requests = extractSecretRequests(accumulated).filter(
+            (request) => !secretNamesRef.current.includes(request.name),
+          );
+          if (requests.length) setSecretsModal({ open: true, requests });
+        }
+      };
 
       try {
-        const res = await fetch("/api/chat", {
-          signal: controller.signal,
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
+        const response = await callChat(
+          {
+            messages: toApiMessages(turnHistory),
+            files: Object.values(filesRef.current).map(({ path, content }) => ({
+              path,
+              content: content.slice(0, 200000),
+            })),
+            mode: kind,
           },
-          body: JSON.stringify({
-            messages: nextHistory.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content })),
-            files: Object.values(files).map(({ path, content }) => ({ path, content })),
-            provider,
-            model,
-            mode,
-          }),
-        });
-
-        if (!res.ok || !res.body) {
-          const errData = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(errData.error || `Request failed (${res.status})`);
+          controller.signal,
+        );
+        if (!response.ok || !response.body) {
+          const failure = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(failure.error || `Request failed (${response.status})`);
         }
-
-        const reader = res.body.getReader();
+        const reader = response.body.getReader();
         const decoder = new TextDecoder();
-
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           accumulated += decoder.decode(value, { stream: true });
-          const snapshot = accumulated;
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: snapshot } : m)),
-          );
+          if (!frame) frame = requestAnimationFrame(flush);
         }
-
-        const finalMessages: ChatMessage[] = [
-          ...nextHistory,
-          { id: assistantId, role: "assistant", content: accumulated },
-        ];
-        setMessages(finalMessages);
-
-        const { artifacts } = parseArtifactsFromText(accumulated);
-        if (artifacts.length > 0) {
-          setFiles((prev) => {
-            const updated = { ...prev };
-            for (const a of artifacts) {
-              for (const f of a.files) updated[f.path] = f;
-            }
-            return updated;
-          });
-          setWorkbenchOpen(true);
-        }
-
-        await persistChat(currentId, finalMessages);
-      } catch (err) {
-        if (controller.signal.aborted) {
-          const partial = accumulated ? [...nextHistory, { id: assistantId, role: "assistant" as const, content: accumulated }] : nextHistory;
-          setMessages(partial);
-          const { artifacts } = parseArtifactsFromText(accumulated);
-          if (artifacts.length) setFiles((previous) => ({ ...previous, ...Object.fromEntries(artifacts.flatMap((artifact) => artifact.files).map((file) => [file.path, file])) }));
-          try { await persistChat(currentId, partial); } catch (error) { toast.error(error instanceof Error ? error.message : "Save failed"); }
-        } else {
-          toast.error(err instanceof Error ? err.message : "Failed to send message");
-          setMessages(accumulated ? [...nextHistory, { id: assistantId, role: "assistant", content: accumulated }] : nextHistory);
-          if (!accumulated) setInput(text);
-        }
+        await finish(false);
+      } catch (error) {
+        if (!controller.signal.aborted)
+          toast.error(error instanceof Error ? error.message : "Failed to send message");
+        await finish(true);
       } finally {
         abortRef.current = null;
         setStreaming(false);
       }
     },
-    [input, streaming, session, activeChatId, messages, provider, model, mode, persistChat, files],
+    [callChat, persistChat, saveProject],
+  );
+
+  const discover = useCallback(
+    async (currentId: string, turnHistory: ChatMessage[], text: string) => {
+      setPlanning({ loading: true, questions: [], history: turnHistory, chatId: currentId, text });
+      const controller = new AbortController();
+      abortRef.current = controller;
+      let questions: PlanningQuestion[] | null = null;
+      try {
+        const response = await callChat(
+          { messages: toApiMessages(turnHistory), mode: "plan", phase: "questions" },
+          controller.signal,
+        );
+        if (response.ok) questions = parseQuestions(await response.text());
+      } catch {
+        if (controller.signal.aborted) return;
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
+      }
+      if (controller.signal.aborted) return;
+      if (questions) {
+        setPlanning({ loading: false, questions, history: turnHistory, chatId: currentId, text });
+      } else {
+        setPlanning(null);
+        await generate(currentId, turnHistory, "plan");
+      }
+    },
+    [callChat, generate],
+  );
+
+  const sendMessage = useCallback(
+    async (textOverride?: string, modeOverride?: ExecutionMode) => {
+      const text = (textOverride ?? input).trim();
+      if (!text || streaming || planning || !session?.access_token) return;
+      const turnMode = modeOverride ?? mode;
+      const currentId = ensureChatId();
+      const turnHistory: ChatMessage[] = [
+        ...messages,
+        { id: newId("u"), role: "user", content: text },
+      ];
+      setMessages(turnHistory);
+      setInput("");
+      if (turnMode === "plan") await discover(currentId, turnHistory, text);
+      else await generate(currentId, turnHistory, "build");
+    },
+    [input, streaming, planning, session, mode, messages, ensureChatId, discover, generate],
+  );
+
+  const submitAnswers = (answers: PlanningAnswer[]) => {
+    if (!planning) return;
+    const { history: turnHistory, chatId: currentId } = planning;
+    setPlanning(null);
+    const withAnswers: ChatMessage[] = answers.length
+      ? [
+          ...turnHistory,
+          {
+            id: newId("u"),
+            role: "user",
+            content: `My answers:\n${answers.map((item) => `• ${item.question}\n   → ${item.answer}`).join("\n")}`,
+          },
+        ]
+      : turnHistory;
+    setMessages(withAnswers);
+    void generate(currentId, withAnswers, "plan");
+  };
+
+  const cancelPlanning = useCallback(() => {
+    abortRef.current?.abort();
+    setPlanning((current) => {
+      if (current) {
+        setMessages(current.history.slice(0, -1));
+        setInput(current.text);
+      }
+      return null;
+    });
+  }, []);
+
+  const buildPlan = useCallback(() => {
+    setMode("build");
+    void sendMessage("Build the project now, following the approved plan above.", "build");
+  }, [sendMessage]);
+
+  const openWorkbench = useCallback(() => setWorkbenchOpen(true), []);
+  const openSecrets = useCallback(
+    (requests: SecretRequest[]) => setSecretsModal({ open: true, requests }),
+    [],
   );
 
   useEffect(() => {
@@ -270,14 +631,17 @@ export function ChatWorkspace({
   }, [initialPrompt, session, sendMessage]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({
+      behavior: streaming ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [messages, streaming]);
 
   const handleEnhance = async () => {
     if (!input.trim() || enhancing || !session?.access_token) return;
     setEnhancing(true);
     try {
-      const res = await fetch("/api/enhancer", {
+      const response = await fetch("/api/enhancer", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -285,348 +649,473 @@ export function ChatWorkspace({
         },
         body: JSON.stringify({ message: input.trim() }),
       });
-      const data = (await res.json()) as { enhanced?: string; error?: string };
-      if (!res.ok) throw new Error(data.error || "Enhance failed");
+      const data = (await response.json()) as { enhanced?: string; error?: string };
+      if (!response.ok) throw new Error(data.error || "Enhance failed");
       if (data.enhanced) setInput(data.enhanced);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not enhance prompt");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not enhance prompt");
     } finally {
       setEnhancing(false);
     }
   };
 
+  const startNewChat = () => {
+    resetWorkspace();
+    chatIdRef.current = "";
+    setWorkbenchOpen(false);
+    setSidebarOpen(false);
+    void navigate({ to: "/chat" });
+  };
+
   const handleDeleteChat = async (id: string) => {
-    if (streaming || !window.confirm("Delete this conversation? This cannot be undone.")) return;
+    if (busy || !window.confirm("Delete this conversation? This cannot be undone.")) return;
     const { error } = await supabase.from("chats").delete().eq("id", id);
-    if (error) { toast.error(error.message); return; }
-    setHistory((prev) => prev.filter((c) => c.id !== id));
-    if (activeChatId === id) {
-      setActiveChatId("");
-      setMessages([]);
-      setFiles({});
-      void navigate({ to: "/chat" });
+    if (error) {
+      toast.error(error.message);
+      return;
     }
+    setHistory((previous) => previous.filter((chat) => chat.id !== id));
+    if (activeChatId === id) startNewChat();
     toast.success("Chat deleted");
   };
 
   const renameChat = async (item: ChatSession) => {
     const description = window.prompt("Conversation name", item.description)?.trim();
     if (!description) return;
-    const { error } = await supabase.from("chats").update({ description: description.slice(0, 80) }).eq("id", item.id);
+    const { error } = await supabase
+      .from("chats")
+      .update({ description: description.slice(0, 80) })
+      .eq("id", item.id);
     if (error) toast.error(error.message);
-    else setHistory((previous) => previous.map((chat) => chat.id === item.id ? { ...chat, description: description.slice(0, 80) } : chat));
+    else
+      setHistory((previous) =>
+        previous.map((chat) =>
+          chat.id === item.id ? { ...chat, description: description.slice(0, 80) } : chat,
+        ),
+      );
   };
-
-  const fileCount = useMemo(() => Object.keys(files).length, [files]);
 
   if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <Loader2 className="size-6 animate-spin text-primary" />
       </div>
     );
   }
 
+  const lastMessageId = messages.at(-1)?.id;
+  const headerButton =
+    "inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
+
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+    <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
       {sidebarOpen && (
-        <div className="fixed inset-0 z-40 flex lg:static lg:inset-auto">
+        <div className="fixed inset-0 z-40 flex xl:static xl:inset-auto">
           <aside className="flex h-full w-72 flex-col border-r border-border bg-sidebar">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="flex h-14 items-center justify-between border-b border-border px-4">
               <BrandLogo showSub />
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(false)}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary lg:hidden"
-              >
-                <Menu className="h-4 w-4" />
-              </button>
             </div>
-
             <div className="p-3">
-              <button
-                type="button"
-                disabled={streaming}
-                onClick={() => {
-                  setActiveChatId("");
-                  setMessages([]);
-                  setFiles({});
-                  setWorkbenchOpen(false);
-                  void navigate({ to: "/chat" });
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                <Plus className="h-3.5 w-3.5" /> Start New Chat
-              </button>
+              <Button className="w-full" size="sm" disabled={busy} onClick={startNewChat}>
+                <Plus /> New chat
+              </Button>
             </div>
-
-            <div className="flex-1 overflow-y-auto px-2 pb-4">
-              <label className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-2 py-2"><Search className="size-3.5 shrink-0 text-muted-foreground" /><input aria-label="Search conversations" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Search conversations" className="min-w-0 flex-1 bg-transparent text-xs outline-none" /></label>
+            <div className="thin-scroll flex-1 overflow-y-auto px-2 pb-4">
+              <label className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-2">
+                <Search className="size-3.5 shrink-0 text-muted-foreground" />
+                <input
+                  aria-label="Search conversations"
+                  value={historySearch}
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  placeholder="Search conversations"
+                  className="min-w-0 flex-1 bg-transparent text-xs outline-none"
+                />
+              </label>
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Recent Chats
+                Recent
               </div>
               {history.length === 0 ? (
-                <p className="px-2 py-4 text-xs text-muted-foreground">No saved conversations yet.</p>
+                <p className="px-2 py-4 text-xs text-muted-foreground">
+                  No saved conversations yet.
+                </p>
               ) : (
-                <ul className="space-y-1">
-                  {history.filter((item) => item.description.toLowerCase().includes(historySearch.toLowerCase())).map((item) => (
-                    <li
-                      key={item.id}
-                      className={`group flex items-center justify-between rounded-lg px-2.5 py-2 text-xs transition-colors ${
-                        activeChatId === item.id
-                          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground hover:bg-secondary/70"
-                      }`}
-                    >
-                      <Link
-                        to="/chat/$id"
-                        params={{ id: item.id }}
-                        className="min-w-0 flex-1 truncate"
-                        onClick={(event) => { if (streaming) event.preventDefault(); else setSidebarOpen(false); }}
+                <ul className="space-y-0.5">
+                  {history
+                    .filter((item) =>
+                      item.description.toLowerCase().includes(historySearch.toLowerCase()),
+                    )
+                    .map((item) => (
+                      <li
+                        key={item.id}
+                        className={`group flex items-center rounded-lg pl-2.5 pr-1 text-xs transition-colors ${
+                          activeChatId === item.id
+                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                            : "text-sidebar-foreground hover:bg-secondary/70"
+                        }`}
                       >
-                        {item.description || "Untitled chat"}
-                      </Link>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label="Rename conversation" title="Rename conversation" disabled={streaming} onClick={() => void renameChat(item)}><Pencil className="size-3" /></Button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteChat(item.id)}
-                        aria-label="Delete chat"
-                        className="ml-1 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </li>
-                  ))}
+                        <Link
+                          to="/chat/$id"
+                          params={{ id: item.id }}
+                          dir="auto"
+                          className="min-w-0 flex-1 truncate py-2"
+                          onClick={(event) => {
+                            if (busy) event.preventDefault();
+                            else setSidebarOpen(false);
+                          }}
+                        >
+                          {item.description || "Untitled chat"}
+                        </Link>
+                        <button
+                          type="button"
+                          aria-label="Rename conversation"
+                          title="Rename"
+                          disabled={busy}
+                          onClick={() => void renameChat(item)}
+                          className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                        >
+                          <Pencil className="size-3" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Delete conversation"
+                          title="Delete"
+                          onClick={() => void handleDeleteChat(item.id)}
+                          className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus:opacity-100 group-hover:opacity-100"
+                        >
+                          <Trash2 className="size-3" />
+                        </button>
+                      </li>
+                    ))}
                 </ul>
               )}
             </div>
-
-            <div className="space-y-1 border-t border-border p-3">
+            <div className="space-y-0.5 border-t border-border p-3">
               {isAdmin && (
                 <Link
                   to="/admin/storage"
-                  className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium text-foreground hover:bg-secondary"
+                  className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium hover:bg-secondary"
                 >
-                  <Shield className="h-3.5 w-3.5 text-primary" /> Admin Storage
+                  <Shield className="size-3.5 text-primary" /> Admin storage
                 </Link>
               )}
               <button
                 type="button"
                 onClick={() => setProfileOpen(true)}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-foreground hover:bg-secondary"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium hover:bg-secondary"
               >
-                <UserIcon className="h-3.5 w-3.5 text-primary" />
-                <span className="truncate">{profile?.display_name || user?.email || "Account"}</span>
+                <span className="flex size-6 items-center justify-center rounded-full bg-brand-accent-soft text-primary">
+                  <UserIcon className="size-3.5" />
+                </span>
+                <span className="truncate">
+                  {profile?.display_name || user?.email || "Account"}
+                </span>
               </button>
             </div>
           </aside>
           <div
-            className="flex-1 bg-foreground/20 backdrop-blur-[1px] lg:hidden"
+            className="flex-1 bg-background/70 backdrop-blur-sm xl:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur">
-          <div className="flex items-center gap-3">
+        <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background/90 px-3 backdrop-blur">
+          <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              onClick={() => setSidebarOpen((v) => !v)}
+              onClick={() => setSidebarOpen((open) => !open)}
               aria-label="Toggle sidebar"
-              className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              className={headerButton}
             >
-              <Menu className="h-4 w-4" />
+              <Menu className="size-4" />
             </button>
             <Link to="/" className="hidden sm:inline-flex">
               <BrandLogo />
             </Link>
+            {fileCount > 0 && (
+              <span
+                dir="auto"
+                className="ml-2 hidden max-w-48 truncate rounded-full border border-border bg-secondary/60 px-3 py-1 text-xs text-muted-foreground md:inline"
+              >
+                {projectName}
+              </span>
+            )}
           </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" title="Export conversation" aria-label="Export conversation" disabled={!messages.length || streaming} onClick={() => downloadFile("whiterchat-conversation.md", conversationMarkdown(messages), "text/markdown")}><Download /></Button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className={headerButton}
+              title="Export conversation"
+              aria-label="Export conversation"
+              disabled={!messages.length || busy}
+              onClick={() =>
+                downloadFile(
+                  "whiterchat-conversation.md",
+                  conversationMarkdown(messages),
+                  "text/markdown",
+                )
+              }
+            >
+              <Download className="size-4" />
+            </button>
             <button
               type="button"
               onClick={toggleTheme}
               aria-label="Toggle theme"
-              className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              title="Toggle theme"
+              className={headerButton}
             >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </button>
-            <button
-              type="button"
-              onClick={() => setWorkbenchOpen((v) => !v)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-secondary/70 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+            <Button
+              variant={workbenchOpen ? "secondary" : "outline"}
+              size="sm"
+              className="ml-1"
+              onClick={() => setWorkbenchOpen((open) => !open)}
             >
-              <PanelRightOpen className="h-3.5 w-3.5 text-primary" />
-              Workbench {fileCount > 0 ? `(${fileCount})` : ""}
-            </button>
+              <PanelRightOpen className="text-primary" />
+              Workbench
+              {fileCount > 0 && (
+                <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">
+                  {fileCount}
+                </span>
+              )}
+            </Button>
           </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col">
-            <div className="flex-1 overflow-y-auto px-4 py-6">
-              <div className="mx-auto max-w-2xl space-y-4">
+            <div className="thin-scroll flex-1 overflow-y-auto px-4 py-6">
+              <div className="mx-auto max-w-3xl space-y-6">
                 {messages.length === 0 ? (
-                  <div className="py-16 text-center">
-                    <h1 className="text-3xl font-bold tracking-tight text-foreground">
-                      What do you want to build?
+                  <div className="pt-[8vh] text-center">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+                      <span className="size-1.5 rounded-full bg-success" /> Live code · Preview ·
+                      Cloud terminal
+                    </span>
+                    <h1 className="mt-5 text-4xl font-bold tracking-tight sm:text-5xl">
+                      What do you want to <span className="text-gradient">build?</span>
                     </h1>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Describe an app, component, or workflow — Whiterchat generates code and live previews instantly.
+                    <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
+                      Describe an app and watch the code appear line by line. Switch to Plan to be
+                      asked a few questions first.
                     </p>
+                    <div className="mx-auto mt-8 grid max-w-2xl gap-2 text-left sm:grid-cols-2">
+                      {SUGGESTIONS.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setInput(suggestion)}
+                          className="rounded-xl border border-border bg-card px-4 py-3 text-xs leading-relaxed text-muted-foreground transition-all hover:border-primary/50 hover:text-foreground hover:shadow-glow"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
-                  messages.map((msg) => {
-                    const parsed =
-                      msg.role === "assistant"
-                        ? parseArtifactsFromText(msg.content)
-                        : { cleanMarkdown: msg.content, artifacts: [] };
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                          msg.role === "user"
-                            ? "ml-auto max-w-[85%] bg-primary text-primary-foreground"
-                            : "border border-border bg-card text-card-foreground"
-                        }`}
-                      >
-                        {msg.role === "user" ? (
-                          <p className="whitespace-pre-wrap">{msg.content}</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {!streaming && msg.content && <div className="flex justify-end"><Button variant="ghost" size="icon" title="Copy response" aria-label="Copy response" onClick={() => { void navigator.clipboard.writeText(msg.content).then(() => toast.success("Response copied")).catch(() => toast.error("Clipboard unavailable")); }}><Copy /></Button></div>}
-                            {parsed.cleanMarkdown ? (
-                              <div className="prose prose-sm max-w-none dark:prose-invert">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {parsed.cleanMarkdown}
-                                </ReactMarkdown>
-                              </div>
-                            ) : streaming ? (
-                              <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating...
-                              </span>
-                            ) : null}
-
-                            {parsed.artifacts.map((art) => (
-                              <button
-                                key={art.id}
-                                type="button"
-                                onClick={() => setWorkbenchOpen(true)}
-                                className="flex w-full items-center justify-between rounded-xl border border-border bg-secondary/60 px-3.5 py-2.5 text-left transition-colors hover:bg-secondary"
-                              >
-                                <div className="flex items-center gap-2.5">
-                                  <FileCode2 className="h-4 w-4 text-primary" />
-                                  <div>
-                                    <div className="text-xs font-semibold text-foreground">{art.title}</div>
-                                    <div className="text-[11px] text-muted-foreground">
-                                      {art.files.length} file{art.files.length === 1 ? "" : "s"} — Click to open Workbench
-                                    </div>
-                                  </div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
+                  messages.map((message) => (
+                    <ChatMessageItem
+                      key={message.id}
+                      message={message}
+                      active={
+                        streaming && message.id === lastMessageId && message.role === "assistant"
+                      }
+                      busy={busy}
+                      livePath={live?.path ?? ""}
+                      savedSecrets={secretNames}
+                      onOpenWorkbench={openWorkbench}
+                      onBuildPlan={buildPlan}
+                      onOpenSecrets={openSecrets}
+                    />
+                  ))
                 )}
                 <div ref={messagesEndRef} />
               </div>
             </div>
 
-            <div className="border-t border-border bg-background px-4 py-3">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void sendMessage();
-                }}
-                className="prompt-shell mx-auto max-w-2xl rounded-2xl p-2"
-              >
-                <textarea
-                  rows={2}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void sendMessage();
-                    }
+            <div className="px-4 pb-4 pt-1">
+              <div className="relative mx-auto max-w-3xl">
+                {planning && (
+                  <PlanningModal
+                    loading={planning.loading}
+                    questions={planning.questions}
+                    onCancel={cancelPlanning}
+                    onSubmit={submitAnswers}
+                  />
+                )}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void sendMessage();
                   }}
-                  placeholder={mode === "plan" ? "Message Whiterchat · Plan mode" : "Message Whiterchat"}
-                  className="w-full resize-none bg-transparent px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-1">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setMode((m) => (m === "build" ? "plan" : "build"))}
-                      className="inline-flex items-center gap-1 rounded-lg border border-border bg-secondary/70 px-2.5 py-1 text-xs font-medium text-foreground hover:bg-secondary"
-                    >
-                      {mode === "build" ? (
-                        <>
-                          <Hammer className="h-3 w-3 text-primary" /> Build
-                        </>
+                  className={`prompt-shell relative rounded-2xl p-2 ${planning ? "z-50" : ""}`}
+                >
+                  <textarea
+                    rows={2}
+                    dir="auto"
+                    value={input}
+                    disabled={planning !== null}
+                    onChange={(event) => setInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
+                        event.preventDefault();
+                        void sendMessage();
+                      }
+                    }}
+                    placeholder={
+                      mode === "plan"
+                        ? "Describe your idea — I will ask a few questions, then write a plan"
+                        : "Describe what to build or change…"
+                    }
+                    className="max-h-48 w-full resize-none bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-1">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        role="radiogroup"
+                        aria-label="Mode"
+                        className="flex items-center rounded-lg bg-muted p-0.5"
+                      >
+                        {(
+                          [
+                            ["build", "Build", Hammer],
+                            ["plan", "Plan", ListChecks],
+                          ] as const
+                        ).map(([id, label, Icon]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            role="radio"
+                            aria-checked={mode === id}
+                            disabled={busy}
+                            onClick={() => setMode(id)}
+                            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                              mode === id
+                                ? "bg-background text-foreground shadow-sm"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            <Icon className={`size-3.5 ${mode === id ? "text-primary" : ""}`} />{" "}
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={enhancing || !input.trim() || busy}
+                        onClick={() => void handleEnhance()}
+                        title="Improve my prompt"
+                        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40"
+                      >
+                        {enhancing ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="size-3.5" />
+                        )}
+                        <span className="hidden sm:inline">Enhance</span>
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ModelSelector
+                        provider={provider}
+                        model={model}
+                        onSelect={(nextProvider, nextModel) => {
+                          setProvider(nextProvider);
+                          setModel(nextModel);
+                        }}
+                      />
+                      {streaming ? (
+                        <button
+                          type="button"
+                          title="Stop generating"
+                          aria-label="Stop generating"
+                          onClick={() => abortRef.current?.abort()}
+                          className="inline-flex size-8 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-85"
+                        >
+                          <Square className="size-3.5 fill-current" />
+                        </button>
                       ) : (
-                        <>
-                          <ListChecks className="h-3 w-3 text-primary" /> Plan
-                        </>
+                        <button
+                          type="submit"
+                          aria-label="Send"
+                          disabled={!input.trim() || planning !== null}
+                          className="inline-flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-glow transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none"
+                        >
+                          <ArrowUp className="size-4" />
+                        </button>
                       )}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={enhancing || !input.trim()}
-                      onClick={handleEnhance}
-                      title="Enhance prompt"
-                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40"
-                    >
-                      {enhancing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      Enhance
-                    </button>
+                    </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <ModelSelector
-                      provider={provider}
-                      model={model}
-                      onSelect={(p, m) => {
-                        setProvider(p);
-                        setModel(m);
-                      }}
-                    />
-                    {streaming && <Button type="button" variant="destructive" size="icon" title="Stop generation" aria-label="Stop generation" onClick={() => abortRef.current?.abort()}><Square /></Button>}
-                    <button
-                      type="submit"
-                      disabled={streaming || !input.trim()}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-                    >
-                      {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-              </form>
+                </form>
+              </div>
             </div>
           </main>
 
           {workbenchOpen && (
-            <div className="fixed inset-x-0 bottom-0 top-14 z-30 bg-background lg:static lg:w-[48%] lg:max-w-3xl">
+            <div className="fixed inset-x-0 bottom-0 top-14 z-30 bg-background lg:static lg:z-auto lg:w-[56%] lg:shrink-0">
               <WorkbenchPanel
                 files={files}
+                liveFiles={live?.files ?? null}
+                livePath={live?.path ?? ""}
+                streaming={streaming}
+                tab={tab}
+                onTabChange={setTab}
+                projectId={projectId}
+                projectName={projectName}
+                onRename={setProjectName}
+                dirty={dirty}
+                saving={saving}
+                persisted={persisted}
+                secretCount={secretNames.length}
+                onSave={() =>
+                  void saveProject().catch((error: unknown) =>
+                    toast.error(
+                      error instanceof Error ? error.message : "Save failed; please try again",
+                    ),
+                  )
+                }
+                ensureProject={ensureProject}
                 onReplaceFiles={setFiles}
                 onUpdateFile={(path, content) =>
-                  setFiles((prev) => ({
-                    ...prev,
-                    [path]: { ...(prev[path] ?? { path, language: "text" }), content },
+                  setFiles((previous) => ({
+                    ...previous,
+                    [path]: {
+                      ...(previous[path] ?? { path, language: inferLanguage(path) }),
+                      content,
+                    },
                   }))
                 }
+                onLoadProject={(id, name, next) => {
+                  projectIdRef.current = id;
+                  setProjectId(id);
+                  setProjectName(name);
+                  setFiles(next);
+                  setSavedSnapshot(snapshotOf(name, next));
+                  setTab("preview");
+                  void refreshSecrets(id);
+                }}
+                onOpenSecrets={() => setSecretsModal({ open: true, requests: [] })}
                 onClose={() => setWorkbenchOpen(false)}
               />
             </div>
           )}
         </div>
       </div>
+
+      <ProjectSecretsModal
+        open={secretsModal.open}
+        requests={secretsModal.requests}
+        ensureProject={ensureProject}
+        onClose={() => setSecretsModal((current) => ({ ...current, open: false }))}
+        onKeysChanged={setSecretNames}
+      />
 
       <ProfileModal
         isOpen={profileOpen}

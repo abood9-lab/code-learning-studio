@@ -3,9 +3,16 @@ import type { ExecutionMode, ProviderId } from "@/lib/types";
 import { ChatWorkspace } from "@/components/ChatWorkspace";
 
 export const Route = createFileRoute("/chat/")({
-  validateSearch: (search: Record<string, unknown>): { prompt?: string; provider?: ProviderId; model?: string; mode?: ExecutionMode } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { prompt?: string; provider?: ProviderId; model?: string; mode?: ExecutionMode } => ({
     ...(typeof search["prompt"] === "string" ? { prompt: search["prompt"] } : {}),
-    ...(search["provider"] === "lovable" || search["provider"] === "openrouter" || search["provider"] === "groq" || search["provider"] === "gemini" ? { provider: search["provider"] } : {}),
+    ...(search["provider"] === "lovable" ||
+    search["provider"] === "openrouter" ||
+    search["provider"] === "groq" ||
+    search["provider"] === "gemini"
+      ? { provider: search["provider"] }
+      : {}),
     ...(typeof search["model"] === "string" ? { model: search["model"] } : {}),
     ...(search["mode"] === "build" || search["mode"] === "plan" ? { mode: search["mode"] } : {}),
   }),
@@ -14,7 +21,10 @@ export const Route = createFileRoute("/chat/")({
       { title: "Workspace — Whiterchat" },
       { name: "description", content: "Chat with Whiterchat AI and build web apps in real time." },
       { property: "og:title", content: "Workspace — Whiterchat" },
-      { property: "og:description", content: "Chat with Whiterchat AI and build web apps in real time." },
+      {
+        property: "og:description",
+        content: "Chat with Whiterchat AI and build web apps in real time.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],

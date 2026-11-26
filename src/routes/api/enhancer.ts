@@ -17,7 +17,8 @@ export const Route = createFileRoute("/api/enhancer")({
 
         const url = process.env["SUPABASE_URL"];
         const key = process.env["SUPABASE_PUBLISHABLE_KEY"];
-        if (!url || !key) return Response.json({ error: "Server configuration missing" }, { status: 500 });
+        if (!url || !key)
+          return Response.json({ error: "Server configuration missing" }, { status: 500 });
 
         const client = createClient(url, key, {
           auth: { persistSession: false },

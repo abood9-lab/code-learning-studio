@@ -8,9 +8,15 @@ export const Route = createFileRoute("/admin/storage")({
   head: () => ({
     meta: [
       { title: "Admin Storage — Whiterchat" },
-      { name: "description", content: "Manage Daytona volumes, active workspace sessions, and Cloudinary status." },
+      {
+        name: "description",
+        content: "Manage Daytona volumes, active workspace sessions, and Cloudinary status.",
+      },
       { property: "og:title", content: "Admin Storage — Whiterchat" },
-      { property: "og:description", content: "Manage Daytona volumes, active workspace sessions, and Cloudinary status." },
+      {
+        property: "og:description",
+        content: "Manage Daytona volumes, active workspace sessions, and Cloudinary status.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -75,7 +81,10 @@ function AdminStoragePage() {
       <header className="border-b border-border bg-card px-6 py-4">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link to="/chat" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+            <Link
+              to="/chat"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
               <ArrowLeft className="h-3.5 w-3.5" /> Workspace
             </Link>
             <BrandLogo />
@@ -129,11 +138,14 @@ function AdminStoragePage() {
               <p className="mt-2 text-xs text-muted-foreground">
                 Status:{" "}
                 <span className="font-medium text-foreground">
-                  {data.cloudinary.configured ? `Connected (${data.cloudinary.cloudName ?? "configured"})` : "Credentials pending"}
+                  {data.cloudinary.configured
+                    ? `Connected (${data.cloudinary.cloudName ?? "configured"})`
+                    : "Credentials pending"}
                 </span>
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Tracked projects: {data.projects.length} · Active sessions: {data.activeSessions.length}
+                Tracked projects: {data.projects.length} · Active sessions:{" "}
+                {data.activeSessions.length}
               </p>
             </div>
           </div>

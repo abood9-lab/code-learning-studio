@@ -121,7 +121,9 @@ export function ModelSelector({ provider, model, onSelect }: ModelSelectorProps)
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate text-xs font-semibold text-foreground">{item.name}</span>
+                      <span className="truncate text-xs font-semibold text-foreground">
+                        {item.name}
+                      </span>
                       <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
                         {item.providerName}
                       </span>

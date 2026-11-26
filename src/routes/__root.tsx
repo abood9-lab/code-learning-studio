@@ -82,12 +82,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Whiterchat — AI Full-Stack Coding Workspace" },
       {
         name: "description",
-        content: "Prompt, build, edit, and preview full-stack web apps with multi-provider AI models and cloud persistence.",
+        content:
+          "Prompt, build, edit, and preview full-stack web apps with multi-provider AI models and cloud persistence.",
       },
       { property: "og:title", content: "Whiterchat — AI Full-Stack Coding Workspace" },
       {
         property: "og:description",
-        content: "Prompt, build, edit, and preview full-stack web apps with multi-provider AI models and cloud persistence.",
+        content:
+          "Prompt, build, edit, and preview full-stack web apps with multi-provider AI models and cloud persistence.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -101,7 +103,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Google+Sans:wght@500&family=Space+Grotesk:wght@400;500;600;700&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap",
       },
       { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
     ],
@@ -114,9 +116,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var t=localStorage.getItem("bolt_theme")==="light"?"light":"dark";document.documentElement.setAttribute("data-theme",t);document.documentElement.classList.toggle("dark",t==="dark")}catch(e){document.documentElement.classList.add("dark")}',
+          }}
+        />
       </head>
       <body>
         {children}
@@ -131,7 +139,7 @@ function RootComponent() {
 
   useEffect(() => {
     const saved = localStorage.getItem("bolt_theme");
-    const theme = saved === "dark" || saved === "light" ? saved : "light";
+    const theme = saved === "light" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.classList.toggle("dark", theme === "dark");
   }, []);

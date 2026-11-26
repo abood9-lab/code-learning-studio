@@ -33,5 +33,9 @@ use the editor.
 - Use shared workspace-tools for file path validation and browser ZIP downloads; never import credential files into generated workspaces.
 - Keep starter projects as browser-native HTML/CSS/JS files compatible with the sandboxed iframe preview.
 - Keep project secrets encrypted in a server-only table after checking project ownership; never include values in AI prompts, workspace files or previews.
-- Route Daytona lifecycle calls through its connector and keep signed toolbox capabilities server-only; commands run only in the caller's owned project sandbox.
+- Keep signed Daytona toolbox capabilities server-only; commands run only in the caller's owned project sandbox.
 - Parse streamed artifacts incrementally for the editor and commit only complete files to the preview, avoiding execution of unfinished JavaScript.
+- Reach Daytona only through its connector gateway; run toolbox commands and uploads through a short-lived signed URL fetched per request, because the legacy toolbox API path no longer exists.
+- Link each conversation to one project with the id `proj_<chatId>` so reopening a chat restores its saved files, keys and sandbox.
+- Open generated apps in a sandboxed iframe everywhere (preview, full screen, new tab); never via a blob or same-origin URL, so generated scripts cannot read the signed-in session.
+- Google sign-in uses the connected Supabase project's own OAuth provider, not the Lovable auth broker.
