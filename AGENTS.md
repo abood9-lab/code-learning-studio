@@ -39,3 +39,9 @@ use the editor.
 - Link each conversation to one project with the id `proj_<chatId>` so reopening a chat restores its saved files, keys and sandbox.
 - Open generated apps in a sandboxed iframe everywhere (preview, full screen, new tab); never via a blob or same-origin URL, so generated scripts cannot read the signed-in session.
 - Google sign-in uses the connected Supabase project's own OAuth provider, not the Lovable auth broker.
+- Cloud Codzer stores every built app's tables as rows in the shared cloud_* tables of the connected Supabase (records are JSON), never as real per-app Postgres tables, so generated SQL can never touch platform data.
+- Built apps reach Cloud Codzer only through the public `/api/public/cloud/$projectId` route, which checks the project key, the visitor session and the table's read/write rule before using the admin client; keep pure rules in `cloud-core.ts` so they stay testable.
+- The preview's `codzer` client holds no credentials: it posts each call to the workbench page (`cloud-bridge.ts`), which adds the project key and visitor session, because the sandboxed frame has no origin or storage.
+- The owner's Cloud panel uses the caller's own Supabase session (RLS on cloud_* tables), not the admin client, except for storage object removal after an ownership check.
+- A project may use the owner's own Supabase instead; store only its URL and public key, refuse secret/service keys, and expose them to the app as `window.CODZER_SUPABASE`.
+- Serve uploaded Cloud files with a sandbox CSP and as downloads unless they are media, so uploads cannot run as pages on this site's origin.

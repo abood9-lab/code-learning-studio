@@ -57,7 +57,7 @@ function ChatMessageItemBase({
     const visible = visibleAssistantText(message.content);
     const { cleanMarkdown, artifacts } = parseArtifactsFromText(visible);
     // Hide a half-streamed opening tag such as "<boltArti".
-    const text = cleanMarkdown.replace(/<\/?(?:bolt\w*|secretR\w*)?[^>]*$/, (tail) =>
+    const text = cleanMarkdown.replace(/<\/?(?:bolt\w*|secretR\w*|cloudS\w*)?[^>]*$/, (tail) =>
       tail.startsWith("<") && !tail.includes(">") ? "" : tail,
     );
     return { text, artifacts, secrets: active ? [] : extractSecretRequests(message.content) };

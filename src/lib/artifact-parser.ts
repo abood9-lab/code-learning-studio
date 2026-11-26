@@ -1,4 +1,5 @@
 import type { ParsedArtifact, WorkspaceFile } from "@/lib/types";
+import { CLOUD_SDK } from "@/lib/cloud-sdk";
 
 export function inferLanguage(filePath: string): string {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
@@ -103,7 +104,13 @@ export function listPreviewPages(files: Record<string, WorkspaceFile>): string[]
   );
 }
 
-export function buildPreviewHtml(files: Record<string, WorkspaceFile>, page?: string): string {
+/** `headExtra` is trusted markup placed before the app's own scripts, e.g. a connected Supabase config. */
+export function buildPreviewHtml(
+  files: Record<string, WorkspaceFile>,
+  page?: string,
+  headExtra = "",
+): string {
+  const bridge = PREVIEW_BRIDGE + CLOUD_SDK + headExtra;
   const fileList = Object.values(files);
   if (fileList.length === 0) {
     return `<!doctype html><html><body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#64748b;background:#f8fafc;"><div>Ask Whiterchat to build an app and its live preview will render here.</div></body></html>`;
@@ -144,9 +151,8 @@ export function buildPreviewHtml(files: Record<string, WorkspaceFile>, page?: st
       const block = `<script>${safeScript(looseJs.map((file) => file.content).join("\n"))}</script>`;
       html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${block}</body>`) : html + block;
     }
-    if (/<head[^>]*>/i.test(html))
-      return html.replace(/<head[^>]*>/i, (head) => head + PREVIEW_BRIDGE);
-    return PREVIEW_BRIDGE + html;
+    if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (head) => head + bridge);
+    return bridge + html;
   }
 
   const cssContent = fileList
@@ -162,7 +168,7 @@ export function buildPreviewHtml(files: Record<string, WorkspaceFile>, page?: st
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  ${PREVIEW_BRIDGE}
+  ${bridge}
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; background: #ffffff; color: #0f172a; }
     ${safeStyle(cssContent)}

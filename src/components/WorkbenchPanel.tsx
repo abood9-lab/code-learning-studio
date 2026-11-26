@@ -3,6 +3,7 @@ import {
   Check,
   Cloud,
   Code2,
+  Database,
   Download,
   Eye,
   FileCode,
@@ -19,11 +20,14 @@ import { starterTemplates } from "@/lib/starter-templates";
 import { Button } from "@/components/ui/button";
 import { ProjectLibrary } from "@/components/ProjectLibrary";
 import { DaytonaTerminal } from "@/components/DaytonaTerminal";
-import { PreviewFrame } from "@/components/workbench/PreviewFrame";
+import { PreviewFrame, type PreviewCloud } from "@/components/workbench/PreviewFrame";
+import { CloudPanel } from "@/components/CloudPanel";
+import type { CloudStatus } from "@/lib/cloud-core";
+import type { CloudAction, CloudResult } from "@/lib/cloud.functions";
 import { CodeView } from "@/components/workbench/CodeView";
 import type { WorkspaceFile } from "@/lib/types";
 
-export type WorkbenchTab = "preview" | "code" | "terminal";
+export type WorkbenchTab = "preview" | "code" | "cloud" | "terminal";
 type FileMap = Record<string, WorkspaceFile>;
 
 interface WorkbenchPanelProps {
@@ -47,12 +51,16 @@ interface WorkbenchPanelProps {
   onUpdateFile: (path: string, content: string) => void;
   onLoadProject: (id: string, name: string, files: FileMap) => void;
   onOpenSecrets: () => void;
+  cloud: CloudStatus | null;
+  previewCloud: PreviewCloud | null;
+  runCloud: (action: CloudAction) => Promise<CloudResult>;
   onClose: () => void;
 }
 
 const TABS: Array<{ id: WorkbenchTab; label: string; icon: typeof Eye }> = [
   { id: "preview", label: "Preview", icon: Eye },
   { id: "code", label: "Code", icon: Code2 },
+  { id: "cloud", label: "Cloud", icon: Database },
   { id: "terminal", label: "Terminal", icon: TerminalSquare },
 ];
 
@@ -267,6 +275,8 @@ export function WorkbenchPanel(props: WorkbenchPanelProps) {
           hasFiles={hasFiles}
           onOpenSecrets={props.onOpenSecrets}
         />
+      ) : tab === "cloud" ? (
+        <CloudPanel projectId={projectId} status={props.cloud} run={props.runCloud} />
       ) : fileCount === 0 ? (
         <div className="thin-scroll flex-1 overflow-y-auto p-6">
           <h2 className="text-lg font-semibold tracking-tight">Start with a template</h2>
@@ -297,7 +307,7 @@ export function WorkbenchPanel(props: WorkbenchPanelProps) {
           </div>
         </div>
       ) : tab === "preview" ? (
-        <PreviewFrame files={files} building={streaming} />
+        <PreviewFrame files={files} building={streaming} cloud={props.previewCloud} />
       ) : (
         <CodeView
           files={shownFiles}

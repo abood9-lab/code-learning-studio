@@ -18,6 +18,7 @@ import { Route as ApiModelsRouteImport } from './routes/api/models'
 import { Route as ChatIndexRouteImport } from './routes/chat.index'
 import { Route as ChatIdRouteImport } from './routes/chat.$id'
 import { Route as ApiAdminStorageRouteImport } from './routes/api/admin/storage'
+import { Route as ApiPublicCloudProjectIdRouteImport } from './routes/api/public/cloud.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -64,6 +65,11 @@ const ApiAdminStorageRoute = ApiAdminStorageRouteImport.update({
   path: '/api/admin/storage',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicCloudProjectIdRoute = ApiPublicCloudProjectIdRouteImport.update({
+  id: '/api/public/cloud/$projectId',
+  path: '/api/public/cloud/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/chat/$id': typeof ChatIdRoute
   '/chat/': typeof ChatIndexRoute
   '/api/admin/storage': typeof ApiAdminStorageRoute
+  '/api/public/cloud/$projectId': typeof ApiPublicCloudProjectIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   '/chat/$id': typeof ChatIdRoute
   '/chat': typeof ChatIndexRoute
   '/api/admin/storage': typeof ApiAdminStorageRoute
+  '/api/public/cloud/$projectId': typeof ApiPublicCloudProjectIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   '/chat/$id': typeof ChatIdRoute
   '/chat/': typeof ChatIndexRoute
   '/api/admin/storage': typeof ApiAdminStorageRoute
+  '/api/public/cloud/$projectId': typeof ApiPublicCloudProjectIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -111,6 +120,7 @@ export interface FileRouteTypes {
     | '/chat/$id'
     | '/chat/'
     | '/api/admin/storage'
+    | '/api/public/cloud/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/chat/$id'
     | '/chat'
     | '/api/admin/storage'
+    | '/api/public/cloud/$projectId'
   id:
     | '__root__'
     | '/'
@@ -133,6 +144,7 @@ export interface FileRouteTypes {
     | '/chat/$id'
     | '/chat/'
     | '/api/admin/storage'
+    | '/api/public/cloud/$projectId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -145,6 +157,7 @@ export interface RootRouteChildren {
   ChatIdRoute: typeof ChatIdRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ApiAdminStorageRoute: typeof ApiAdminStorageRoute
+  ApiPublicCloudProjectIdRoute: typeof ApiPublicCloudProjectIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -212,6 +225,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAdminStorageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/cloud/$projectId': {
+      id: '/api/public/cloud/$projectId'
+      path: '/api/public/cloud/$projectId'
+      fullPath: '/api/public/cloud/$projectId'
+      preLoaderRoute: typeof ApiPublicCloudProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -225,6 +245,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChatIdRoute: ChatIdRoute,
   ChatIndexRoute: ChatIndexRoute,
   ApiAdminStorageRoute: ApiAdminStorageRoute,
+  ApiPublicCloudProjectIdRoute: ApiPublicCloudProjectIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

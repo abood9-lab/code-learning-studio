@@ -12,7 +12,15 @@ import {
   Trash2,
 } from "lucide-react";
 import { buildPreviewHtml, listPreviewPages } from "@/lib/artifact-parser";
+import { answerCloudCall, type CloudConnection } from "@/lib/cloud-bridge";
 import type { WorkspaceFile } from "@/lib/types";
+
+export interface PreviewCloud extends CloudConnection {
+  /** Set when the project uses the owner's own Supabase instead of Cloud Codzer. */
+  supabase: { url: string; key: string } | null;
+  /** Changes whenever the cloud setup changes, so the app restarts against it. */
+  version: number;
+}
 
 type Device = "desktop" | "tablet" | "mobile";
 interface ConsoleEntry {
@@ -29,10 +37,15 @@ const SANDBOX = "allow-scripts allow-forms allow-modals allow-popups";
 export function PreviewFrame({
   files,
   building,
+  cloud,
 }: {
   files: Record<string, WorkspaceFile>;
   building: boolean;
+  cloud: PreviewCloud | null;
 }) {
+  const cloudRef = useRef(cloud);
+  cloudRef.current = cloud;
+  const supabaseConfig = cloud?.supabase ? JSON.stringify(cloud.supabase) : "";
   const [device, setDevice] = useState<Device>("desktop");
   const [reloadKey, setReloadKey] = useState(0);
   const [page, setPage] = useState("");
@@ -45,7 +58,17 @@ export function PreviewFrame({
 
   const pages = useMemo(() => listPreviewPages(files), [files]);
   const activePage = page && files[page] ? page : (pages[0] ?? "");
-  const liveHtml = useMemo(() => buildPreviewHtml(files, activePage), [files, activePage]);
+  const liveHtml = useMemo(
+    () =>
+      buildPreviewHtml(
+        files,
+        activePage,
+        supabaseConfig
+          ? `<script>window.CODZER_SUPABASE=${supabaseConfig.replace(/</g, "\\u003c")}</script>`
+          : "",
+      ),
+    [files, activePage, supabaseConfig],
+  );
 
   // Debounce so typing in the editor does not reload the page on every keystroke.
   const [html, setHtml] = useState(liveHtml);
@@ -69,6 +92,10 @@ export function PreviewFrame({
         data.source !== "whiterchat-preview"
       )
         return;
+      if ("cloud" in data) {
+        void answerCloudCall(event.source as Window, cloudRef.current, data.cloud);
+        return;
+      }
       if ("navigate" in data && typeof data.navigate === "string") {
         const target = data.navigate
           .replace(/^\.?\//, "")
@@ -123,6 +150,11 @@ export function PreviewFrame({
     frame.style.cssText = "border:0;width:100vw;height:100vh;display:block";
     frame.srcdoc = html;
     tab.document.body.appendChild(frame);
+    tab.addEventListener("message", (event: MessageEvent) => {
+      const data: unknown = event.data;
+      if (event.source !== frame.contentWindow || !data || typeof data !== "object") return;
+      if ("cloud" in data) void answerCloudCall(event.source as Window, cloudRef.current, data.cloud);
+    });
   };
 
   const errorCount = logs.filter((entry) => entry.level === "error").length;
@@ -145,7 +177,7 @@ export function PreviewFrame({
   const iframe = (
     <iframe
       ref={iframeRef}
-      key={`${reloadKey}-${activePage}`}
+      key={`${reloadKey}-${activePage}-${cloud?.version ?? 0}`}
       title="Live application preview"
       sandbox={SANDBOX}
       srcDoc={html}

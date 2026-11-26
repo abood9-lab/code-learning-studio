@@ -33,6 +33,8 @@ import {
 } from "@/lib/workspace-protocol";
 import { conversationMarkdown, downloadFile } from "@/lib/workspace-tools";
 import { manageProjectSecrets } from "@/lib/workspace.functions";
+import { cloudAdmin, type CloudAction } from "@/lib/cloud.functions";
+import { extractCloudSchema, type CloudStatus } from "@/lib/cloud-core";
 import type {
   ChatMessage,
   ChatSession,
@@ -122,6 +124,7 @@ export function ChatWorkspace({
     signOut,
   } = useAuth();
   const listSecrets = useServerFn(manageProjectSecrets);
+  const cloudFn = useServerFn(cloudAdmin);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -147,6 +150,8 @@ export function ChatWorkspace({
   const [savedSnapshot, setSavedSnapshot] = useState("");
   const [saving, setSaving] = useState(false);
   const [secretNames, setSecretNames] = useState<string[]>([]);
+  const [cloud, setCloud] = useState<CloudStatus | null>(null);
+  const [cloudVersion, setCloudVersion] = useState(0);
 
   const [planning, setPlanning] = useState<PlanningState | null>(null);
   const [secretsModal, setSecretsModal] = useState<{ open: boolean; requests: SecretRequest[] }>({
@@ -167,6 +172,8 @@ export function ChatWorkspace({
   chatIdRef.current = activeChatId;
   const secretNamesRef = useRef(secretNames);
   secretNamesRef.current = secretNames;
+  const cloudRef = useRef(cloud);
+  cloudRef.current = cloud;
   const historyRef = useRef(history);
   historyRef.current = history;
 
@@ -177,6 +184,21 @@ export function ChatWorkspace({
     [projectName, files, savedSnapshot],
   );
   const fileCount = Object.keys(files).length;
+  const previewCloud = useMemo(
+    () =>
+      projectId && cloud?.enabled
+        ? {
+            projectId,
+            apiKey: cloud.backend === "codzer" ? cloud.apiKey : "",
+            supabase:
+              cloud.backend === "supabase" && cloud.supabaseUrl
+                ? { url: cloud.supabaseUrl, key: cloud.supabaseKey }
+                : null,
+            version: cloudVersion,
+          }
+        : null,
+    [projectId, cloud, cloudVersion],
+  );
   const busy = streaming || planning !== null;
 
   useEffect(() => {
@@ -199,6 +221,7 @@ export function ChatWorkspace({
     setProjectName(DEFAULT_PROJECT_NAME);
     setSavedSnapshot("");
     setSecretNames([]);
+    setCloud(null);
     setActiveChatId("");
   }, []);
 
@@ -239,6 +262,17 @@ export function ChatWorkspace({
       }
     },
     [listSecrets],
+  );
+
+  const refreshCloud = useCallback(
+    async (id: string) => {
+      try {
+        setCloud((await cloudFn({ data: { projectId: id, action: "status" } })).status);
+      } catch {
+        setCloud(null);
+      }
+    },
+    [cloudFn],
   );
 
   // Open a saved conversation, preferring the saved project files (which keep manual edits) over chat artifacts.
@@ -288,6 +322,7 @@ export function ChatWorkspace({
         setSavedSnapshot(snapshotOf(project.name, loadedFiles));
         if (Object.keys(loadedFiles).length) setWorkbenchOpen(true);
         void refreshSecrets(project.id);
+        void refreshCloud(project.id);
         return;
       }
       let extracted: FileMap = {};
@@ -298,12 +333,13 @@ export function ChatWorkspace({
       setProjectId("");
       setSavedSnapshot("");
       setSecretNames([]);
+      setCloud(null);
       if (Object.keys(extracted).length) setWorkbenchOpen(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [chatId, userId, resetWorkspace, refreshSecrets]);
+  }, [chatId, userId, resetWorkspace, refreshSecrets, refreshCloud]);
 
   const ensureChatId = useCallback(() => {
     if (chatIdRef.current) return chatIdRef.current;
@@ -382,6 +418,20 @@ export function ChatWorkspace({
     return saveProject({ silent: true });
   }, [saveProject, savedSnapshot]);
 
+  /** Runs a Cloud Codzer action for this project, saving the project first if it does not exist yet. */
+  const runCloud = useCallback(
+    async (action: CloudAction) => {
+      const id = await ensureProject();
+      const result = await cloudFn({ data: { ...action, projectId: id } });
+      setCloud(result.status);
+      // Restart the preview so the app sees new tables, rules or a changed connection.
+      if (!["status", "rows", "users", "files"].includes(action.action))
+        setCloudVersion((version) => version + 1);
+      return result;
+    },
+    [ensureProject, cloudFn],
+  );
+
   const persistChat = useCallback(
     async (id: string, nextMessages: ChatMessage[]) => {
       if (!user) return;
@@ -416,7 +466,16 @@ export function ChatWorkspace({
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token ?? ""}`,
         },
-        body: JSON.stringify({ provider, model, secretNames: secretNamesRef.current, ...body }),
+        body: JSON.stringify({
+          provider,
+          model,
+          secretNames: secretNamesRef.current,
+          cloud: {
+            backend: cloudRef.current?.backend ?? "codzer",
+            tables: cloudRef.current?.tables.map((table) => table.name) ?? [],
+          },
+          ...body,
+        }),
       }),
     [session, provider, model],
   );
@@ -497,6 +556,19 @@ export function ChatWorkspace({
             (request) => !secretNamesRef.current.includes(request.name),
           );
           if (requests.length) setSecretsModal({ open: true, requests });
+          const tables = extractCloudSchema(accumulated);
+          if (tables.length && cloudRef.current?.backend !== "supabase") {
+            try {
+              await runCloud({ action: "applySchema", tables });
+              toast.success(
+                `Cloud database ready: ${tables.map((table) => table.name).join(", ")}`,
+              );
+            } catch (error) {
+              toast.error(
+                error instanceof Error ? error.message : "Could not set up the Cloud database",
+              );
+            }
+          }
         }
       };
 
@@ -534,7 +606,7 @@ export function ChatWorkspace({
         setStreaming(false);
       }
     },
-    [callChat, persistChat, saveProject],
+    [callChat, persistChat, saveProject, runCloud],
   );
 
   const discover = useCallback(
@@ -1100,8 +1172,12 @@ export function ChatWorkspace({
                   setSavedSnapshot(snapshotOf(name, next));
                   setTab("preview");
                   void refreshSecrets(id);
+                  void refreshCloud(id);
                 }}
                 onOpenSecrets={() => setSecretsModal({ open: true, requests: [] })}
+                cloud={cloud}
+                previewCloud={previewCloud}
+                runCloud={runCloud}
                 onClose={() => setWorkbenchOpen(false)}
               />
             </div>

@@ -25,9 +25,41 @@ const ChatRequestSchema = z.object({
     .array(z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/))
     .max(100)
     .default([]),
+  cloud: z
+    .object({
+      backend: z.enum(["codzer", "supabase"]).default("codzer"),
+      tables: z.array(z.string().max(63)).max(30).default([]),
+    })
+    .default({ backend: "codzer", tables: [] }),
 });
 
-function buildSystemPrompt(mode: "build" | "plan", phase: "response" | "questions"): string {
+type CloudContext = z.infer<typeof ChatRequestSchema>["cloud"];
+
+/** Tells the model which backend the project has, so apps that need saved data use it instead of faking it. */
+function cloudPrompt(cloud: CloudContext): string {
+  if (cloud.backend === "supabase")
+    return [
+      'BACKEND: this project is connected to the user\'s own Supabase. When the app needs saved data, accounts or files, load supabase-js with <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script> and create the client with supabase.createClient(window.CODZER_SUPABASE.url, window.CODZER_SUPABASE.key). Never hardcode keys.',
+      "Also write a schema.sql file with the CREATE TABLE statements, GRANTs and row level security policies the user must run in their Supabase SQL editor, and tell them to run it. Do not use window.codzer or emit cloudSchema.",
+    ].join("\n");
+  return [
+    "BACKEND: every project has Cloud Codzer, a real hosted backend, available in the browser as the global `codzer` (already loaded; never import or define it). Use it whenever the app must keep data between visits, share data between visitors, sign users in, or store uploaded files. Never fake persistence with localStorage or hardcoded arrays when the user asks for a database, accounts or saved data.",
+    'To create or change tables emit, outside the artifact, <cloudSchema>{"tables":[{"name":"todos","columns":[{"name":"title","type":"text"},{"name":"done","type":"boolean"}],"read":"public","write":"public"}]}</cloudSchema>. Names are lowercase snake_case. Column types: text, number, boolean, date, json. Every record automatically has id, user_id, created_at and updated_at; never declare them. "read" and "write" are each one of: "public" (anyone), "authenticated" (signed-in app users), "owner" (only the signed-in user who created the record). Choose the strictest rule that fits; private user data must use "owner". Re-emit a table only when it changes.',
+    "Every call returns a promise of {data, error}; always check error and show it to the user.",
+    'Data: await codzer.from("todos").select().eq("done", false).order("created_at", {ascending:false}).limit(50); await codzer.from("todos").insert({title:"x"}) (data is the array of created records); await codzer.from("todos").update({done:true}).eq("id", id); await codzer.from("todos").delete().eq("id", id). Filters: eq, neq, gt, gte, lt, lte, like, in. Also .range(from,to), .single(), .maybeSingle(). update and delete require a filter.',
+    "Accounts: await codzer.auth.signUp({email, password}); codzer.auth.signIn({email, password}); codzer.auth.signOut(); codzer.auth.getUser() resolves {data:{user}} where user is {id,email} or null; codzer.auth.onAuthChange(user => ...). Passwords need 6+ characters. Build real sign-up and sign-in forms when tables use authenticated or owner rules.",
+    'Files (max 5 MB): await codzer.storage.upload("avatars/a.png", file) from an <input type="file">; codzer.storage.url(path) resolves {data:{url}} to put in an img src; codzer.storage.list(); codzer.storage.remove(path).',
+    cloud.tables.length
+      ? `Existing Cloud tables: ${cloud.tables.join(", ")}.`
+      : "No Cloud tables exist yet.",
+  ].join("\n");
+}
+
+function buildSystemPrompt(
+  mode: "build" | "plan",
+  phase: "response" | "questions",
+  cloud: CloudContext,
+): string {
   if (phase === "questions")
     return [
       "You are Whiterchat, a senior product architect. Before planning, ask 2 to 5 focused questions tailored to the user's actual project, audience, scope, integrations and visual preferences. Do not ask things already answered.",
@@ -41,7 +73,11 @@ function buildSystemPrompt(mode: "build" | "plan", phase: "response" | "question
       "## Summary — two or three sentences on what will be built and for whom.",
       "## Features — bullet list, most important first, each with a one-line acceptance criterion.",
       "## Pages & flows — each screen and what the user does on it.",
-      "## Data & integrations — data stored, external services, and the NAMES of any private API keys required (never values).",
+      "## Data & integrations — data stored, external services, and the NAMES of any private API keys required (never values). Saved data, user accounts and file uploads use " +
+        (cloud.backend === "supabase"
+          ? "the user's connected Supabase"
+          : "the built-in Cloud Codzer backend") +
+        "; list the tables and who may read and write each.",
       "## Design direction — colours, typography, tone.",
       "## Build steps — a GitHub task list (- [ ] item) in build order, grouped by milestone.",
       "## Open questions — risks and assumptions.",
@@ -57,6 +93,7 @@ function buildSystemPrompt(mode: "build" | "plan", phase: "response" | "question
     "If the conversation contains an approved plan, implement it faithfully. Write one or two short sentences before the artifact and a short summary after it; never paste file contents outside the artifact.",
     'When private API credentials are required, emit <secretRequest>{"secrets":[{"name":"SERVICE_API_KEY","reason":"Explain what service needs this key in the user\'s language"}]}</secretRequest>. Ask ONLY for names not already configured. Never ask the user to paste values in chat. Never embed keys, .env files, or private credentials in generated code. Secrets are available ONLY as server-side environment variables in Daytona commands, NEVER in the browser preview. For a private API, explain that a server-side integration is required; do not pretend a browser-only app can securely use the key.',
     "Write files one at a time with complete boltAction closing tags so users see code as you write. Preserve the supplied current files when editing. Do not execute shell commands automatically.",
+    cloudPrompt(cloud),
   ].join("\n");
 }
 
@@ -167,7 +204,7 @@ export const Route = createFileRoute("/api/chat")({
         }
 
         const systemPrompt =
-          buildSystemPrompt(parsedBody.mode, parsedBody.phase) +
+          buildSystemPrompt(parsedBody.mode, parsedBody.phase, parsedBody.cloud) +
           (parsedBody.secretNames.length
             ? `\nConfigured project key NAMES (never values): ${parsedBody.secretNames.join(", ")}`
             : "");

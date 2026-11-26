@@ -61,5 +61,5 @@ export function streamedFiles(text: string, completeOnly = false): Record<string
 }
 
 export function visibleAssistantText(text: string): string {
-  return text.replace(/<secretRequest>[\s\S]*?(?:<\/secretRequest>|$)/g, "");
+  return text.replace(/<(secretRequest|cloudSchema)>[\s\S]*?(?:<\/\1>|$)/g, "");
 }
