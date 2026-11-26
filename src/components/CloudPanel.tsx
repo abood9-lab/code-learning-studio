@@ -352,8 +352,8 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                         description: `${user.email} will no longer be able to sign in to your app.`,
                         confirmLabel: "Remove user",
                         danger: true,
-                      }).then(
-                        (yes) => yes && act({ action: "deleteUser", id: user.id }, "User removed"),
+                      }).then((yes) =>
+                        yes ? act({ action: "deleteUser", id: user.id }, "User removed") : null,
                       )
                     }
                   >
@@ -394,8 +394,8 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                         description: `${file.path} will be removed for good.`,
                         confirmLabel: "Delete file",
                         danger: true,
-                      }).then(
-                        (yes) => yes && act({ action: "deleteFile", id: file.id }, "File deleted"),
+                      }).then((yes) =>
+                        yes ? act({ action: "deleteFile", id: file.id }, "File deleted") : null,
                       )
                     }
                   >
@@ -502,9 +502,10 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                         description: `The table and all ${table.rows} record(s) in it will be removed for good.`,
                         confirmLabel: "Delete table",
                         danger: true,
-                      }).then(
-                        (yes) =>
-                          yes && act({ action: "dropTable", table: table.name }, "Table deleted"),
+                      }).then((yes) =>
+                        yes
+                          ? act({ action: "dropTable", table: table.name }, "Table deleted")
+                          : null,
                       )
                     }
                   >
@@ -686,10 +687,10 @@ export function CloudPanel({ projectId, status, run }: CloudPanelProps) {
                                 description: "This cannot be undone.",
                                 confirmLabel: "Delete record",
                                 danger: true,
-                              }).then(
-                                (yes) =>
-                                  yes &&
-                                  act({ action: "deleteRow", table: table.name, id: row.id }),
+                              }).then((yes) =>
+                                yes
+                                  ? act({ action: "deleteRow", table: table.name, id: row.id })
+                                  : null,
                               )
                             }
                           >
